@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -35,6 +36,12 @@ class JsonModePiRunnerTest {
         }
     }
 
+    private static JsonModePiRunner runner(Path command) {
+        return new JsonModePiRunner(
+                new PiProperties(command.toString(), Duration.ofSeconds(10), null),
+                new AgentResolver(List.of()));
+    }
+
     @Test
     void fakePiFixture_printsExpectedSuccessJsonl() throws Exception {
         Process process = new ProcessBuilder(fakePi.toString(), "--mode", "json", "say hello").start();
@@ -49,9 +56,7 @@ class JsonModePiRunnerTest {
 
     @Test
     void run_withSuccessfulPrompt_shouldReturnSuccessAndAuthoritativeText() {
-        PiRunner runner = new JsonModePiRunner(new PiProperties(fakePi.toString(), Duration.ofSeconds(10), null));
-
-        PiRunResult result = runner.run("say hello");
+        PiRunResult result = runner(fakePi).run("say hello");
 
         assertThat(result.status()).isEqualTo(PiRunStatus.SUCCESS);
         assertThat(result.finalText()).isEqualTo("Hello world!");
@@ -59,9 +64,7 @@ class JsonModePiRunnerTest {
 
     @Test
     void run_withFailingPrompt_shouldReturnFailure() {
-        PiRunner runner = new JsonModePiRunner(new PiProperties(fakePi.toString(), Duration.ofSeconds(10), null));
-
-        PiRunResult result = runner.run("fail now");
+        PiRunResult result = runner(fakePi).run("fail now");
 
         assertThat(result.status()).isEqualTo(PiRunStatus.FAILURE);
         assertThat(result.diagnostics()).isEqualTo("error");
@@ -69,10 +72,71 @@ class JsonModePiRunnerTest {
 
     @Test
     void run_withHangingPrompt_shouldReturnTimeout() {
-        PiRunner runner = new JsonModePiRunner(new PiProperties(fakePi.toString(), Duration.ofSeconds(1), null));
+        JsonModePiRunner runner = new JsonModePiRunner(
+                new PiProperties(fakePi.toString(), Duration.ofSeconds(1), null),
+                new AgentResolver(List.of()));
 
         PiRunResult result = runner.run("hang");
 
         assertThat(result.status()).isEqualTo(PiRunStatus.TIMEOUT);
+    }
+
+    @Test
+    void run_withAgent_shouldPassAgentFlags() throws IOException {
+        Path agentDir = tempDir.resolve("agents");
+        Files.createDirectories(agentDir);
+        Files.writeString(agentDir.resolve("analyst.md"), """
+                ---
+                name: analyst
+                tools: read, grep
+                model: deepseek/deepseek-v4-pro
+                ---
+                You are an analyst.
+                """);
+
+        Path agentPi = tempDir.resolve("fake-pi-agent");
+        Files.writeString(agentPi, """
+                #!/bin/sh
+                echo "ARGS: $*" >&2
+                for last_arg; do :; done
+                prompt="$last_arg"
+                case "$prompt" in
+                  *fail*)
+                    echo '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"oops"}],"stopReason":"error"}}'
+                    echo '{"type":"agent_settled","aborted":false}'
+                    ;;
+                  *)
+                    echo '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}'
+                    echo '{"type":"agent_settled","aborted":false}'
+                    ;;
+                esac
+                """);
+        if (!agentPi.toFile().setExecutable(true)) {
+            throw new IllegalStateException("could not make fake-pi-agent executable");
+        }
+
+        JsonModePiRunner runner = new JsonModePiRunner(
+                new PiProperties(agentPi.toString(), Duration.ofSeconds(10), null),
+                new AgentResolver(List.of(agentDir)));
+
+        PiRunResult result = runner.run("analyst", "hello");
+
+        assertThat(result.status()).isEqualTo(PiRunStatus.SUCCESS);
+        assertThat(result.finalText()).isEqualTo("ok");
+        assertThat(result.diagnostics())
+                .contains("--model", "deepseek/deepseek-v4-pro")
+                .contains("--tools", "read,grep")
+                .contains("--append-system-prompt")
+                .contains("--no-session");
+    }
+
+    @Test
+    void run_withUnknownAgent_shouldReturnFailure() {
+        JsonModePiRunner runner = runner(fakePi);
+
+        PiRunResult result = runner.run("unknown-agent", "hello");
+
+        assertThat(result.status()).isEqualTo(PiRunStatus.FAILURE);
+        assertThat(result.diagnostics()).contains("Unknown agent: unknown-agent");
     }
 }

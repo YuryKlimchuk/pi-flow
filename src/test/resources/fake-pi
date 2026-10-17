@@ -1,7 +1,8 @@
 #!/bin/sh
 # Fake pi for JSON-mode integration tests.
-# Usage: fake-pi --mode json <prompt>
-prompt="$3"
+# Usage: fake-pi --mode json [flags...] <prompt>
+for last_arg; do :; done
+prompt="$last_arg"
 
 case "$prompt" in
   *fail*)
