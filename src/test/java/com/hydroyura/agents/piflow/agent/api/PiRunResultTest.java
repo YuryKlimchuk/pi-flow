@@ -1,4 +1,4 @@
-package com.hydroyura.agents.piflow.agent;
+package com.hydroyura.agents.piflow.agent.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

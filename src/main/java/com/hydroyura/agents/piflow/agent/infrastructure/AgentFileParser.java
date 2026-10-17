@@ -1,5 +1,6 @@
-package com.hydroyura.agents.piflow.agent;
+package com.hydroyura.agents.piflow.agent.infrastructure;
 
+import com.hydroyura.agents.piflow.agent.domain.AgentDefinition;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;

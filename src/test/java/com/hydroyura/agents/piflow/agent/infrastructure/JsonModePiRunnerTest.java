@@ -1,7 +1,9 @@
-package com.hydroyura.agents.piflow.agent;
+package com.hydroyura.agents.piflow.agent.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.hydroyura.agents.piflow.agent.api.PiRunResult;
+import com.hydroyura.agents.piflow.agent.api.PiRunStatus;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -39,7 +41,7 @@ class JsonModePiRunnerTest {
     private static JsonModePiRunner runner(Path command) {
         return new JsonModePiRunner(
                 new PiProperties(command.toString(), Duration.ofSeconds(10), null),
-                new AgentResolver(List.of()));
+                new FileAgentResolver(List.of()));
     }
 
     @Test
@@ -74,7 +76,7 @@ class JsonModePiRunnerTest {
     void run_withHangingPrompt_shouldReturnTimeout() {
         JsonModePiRunner runner = new JsonModePiRunner(
                 new PiProperties(fakePi.toString(), Duration.ofSeconds(1), null),
-                new AgentResolver(List.of()));
+                new FileAgentResolver(List.of()));
 
         PiRunResult result = runner.run("hang");
 
@@ -117,7 +119,7 @@ class JsonModePiRunnerTest {
 
         JsonModePiRunner runner = new JsonModePiRunner(
                 new PiProperties(agentPi.toString(), Duration.ofSeconds(10), null),
-                new AgentResolver(List.of(agentDir)));
+                new FileAgentResolver(List.of(agentDir)));
 
         PiRunResult result = runner.run("analyst", "hello");
 

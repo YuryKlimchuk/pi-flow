@@ -1,4 +1,4 @@
-package com.hydroyura.agents.piflow.agent;
+package com.hydroyura.agents.piflow.agent.infrastructure;
 
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;

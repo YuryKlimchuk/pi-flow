@@ -1,18 +1,16 @@
 package com.hydroyura.agents.piflow.shell;
 
-import com.hydroyura.agents.piflow.agent.PiRunResult;
-import com.hydroyura.agents.piflow.agent.PiRunner;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.hydroyura.agents.piflow.agent.api.PiRunResult;
+import com.hydroyura.agents.piflow.agent.api.PiRunner;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.shell.core.command.annotation.Argument;
 import org.springframework.shell.core.command.annotation.Command;
 import org.springframework.shell.core.command.annotation.CommandGroup;
 
 /** Interactive commands to exercise the Pi agent integration manually. */
 @CommandGroup
+@Slf4j
 public class AgentCommands {
-
-    private static final Logger log = LoggerFactory.getLogger(AgentCommands.class);
 
     private final PiRunner piRunner;
 

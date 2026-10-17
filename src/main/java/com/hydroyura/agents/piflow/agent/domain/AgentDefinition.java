@@ -1,4 +1,4 @@
-package com.hydroyura.agents.piflow.agent;
+package com.hydroyura.agents.piflow.agent.domain;
 
 import java.util.List;
 

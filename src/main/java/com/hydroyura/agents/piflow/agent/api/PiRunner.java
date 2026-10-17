@@ -1,4 +1,4 @@
-package com.hydroyura.agents.piflow.agent;
+package com.hydroyura.agents.piflow.agent.api;
 
 /** Port for invoking the Pi Coding Agent and capturing a structured result. */
 public interface PiRunner {

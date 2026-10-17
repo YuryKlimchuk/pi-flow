@@ -1,5 +1,6 @@
-package com.hydroyura.agents.piflow.agent;
+package com.hydroyura.agents.piflow.agent.infrastructure;
 
+import com.hydroyura.agents.piflow.agent.application.AgentResolver;
 import java.nio.file.Path;
 import java.util.List;
 import org.springframework.context.annotation.Bean;
@@ -13,6 +14,6 @@ public class AgentIntegrationConfig {
     AgentResolver agentResolver() {
         Path projectAgents = Path.of(".pi", "agents");
         Path userAgents = Path.of(System.getProperty("user.home"), ".pi", "agent", "agents");
-        return new AgentResolver(List.of(projectAgents, userAgents));
+        return new FileAgentResolver(List.of(projectAgents, userAgents));
     }
 }

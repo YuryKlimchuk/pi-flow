@@ -1,4 +1,4 @@
-package com.hydroyura.agents.piflow.agent;
+package com.hydroyura.agents.piflow.agent.api;
 
 /**
  * Structured result of a single Pi agent run.

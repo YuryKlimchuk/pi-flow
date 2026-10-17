@@ -1,7 +1,6 @@
-package com.hydroyura.agents.piflow.agent;
+package com.hydroyura.agents.piflow.agent.infrastructure;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -11,9 +10,9 @@ import tools.jackson.databind.ObjectMapper;
  *
  * <p>Pure (no Spring), so it can be unit-tested against fixture records.</p>
  */
+@Slf4j
 public final class PiJsonlParser {
 
-    private static final Logger log = LoggerFactory.getLogger(PiJsonlParser.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final StringBuilder streamedText = new StringBuilder();

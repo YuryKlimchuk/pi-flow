@@ -1,4 +1,4 @@
-package com.hydroyura.agents.piflow.agent;
+package com.hydroyura.agents.piflow.agent.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -9,7 +9,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-class AgentResolverTest {
+class FileAgentResolverTest {
 
     @TempDir
     Path tempDir;
@@ -26,7 +26,7 @@ class AgentResolverTest {
                 Inspect code.
                 """);
 
-        AgentResolver resolver = new AgentResolver(List.of(agents));
+        FileAgentResolver resolver = new FileAgentResolver(List.of(agents));
 
         assertThat(resolver.resolve("analyst"))
                 .isPresent()
@@ -35,7 +35,7 @@ class AgentResolverTest {
 
     @Test
     void resolve_whenMissing_shouldReturnEmpty() {
-        AgentResolver resolver = new AgentResolver(List.of(tempDir));
+        FileAgentResolver resolver = new FileAgentResolver(List.of(tempDir));
 
         assertThat(resolver.resolve("nope")).isEmpty();
     }
@@ -49,7 +49,7 @@ class AgentResolverTest {
         Files.writeString(project.resolve("worker.md"), "---\nname: worker\ntools: read\n---\nProject worker.\n");
         Files.writeString(user.resolve("worker.md"), "---\nname: worker\ntools: read, bash\n---\nUser worker.\n");
 
-        AgentResolver resolver = new AgentResolver(List.of(project, user));
+        FileAgentResolver resolver = new FileAgentResolver(List.of(project, user));
 
         assertThat(resolver.resolve("worker"))
                 .isPresent()

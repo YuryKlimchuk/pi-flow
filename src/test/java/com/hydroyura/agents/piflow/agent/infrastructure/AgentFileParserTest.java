@@ -1,7 +1,8 @@
-package com.hydroyura.agents.piflow.agent;
+package com.hydroyura.agents.piflow.agent.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.hydroyura.agents.piflow.agent.domain.AgentDefinition;
 import org.junit.jupiter.api.Test;
 
 class AgentFileParserTest {

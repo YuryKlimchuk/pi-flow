@@ -1,5 +1,10 @@
-package com.hydroyura.agents.piflow.agent;
+package com.hydroyura.agents.piflow.agent.infrastructure;
 
+import com.hydroyura.agents.piflow.agent.api.PiRunResult;
+import com.hydroyura.agents.piflow.agent.api.PiRunStatus;
+import com.hydroyura.agents.piflow.agent.api.PiRunner;
+import com.hydroyura.agents.piflow.agent.application.AgentResolver;
+import com.hydroyura.agents.piflow.agent.domain.AgentDefinition;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -12,17 +17,15 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
  * Runs Pi as a child process in JSON mode and assembles its JSONL output.
  */
 @Service
+@Slf4j
 public class JsonModePiRunner implements PiRunner {
-
-    private static final Logger log = LoggerFactory.getLogger(JsonModePiRunner.class);
 
     private final PiProperties properties;
     private final AgentResolver agentResolver;
