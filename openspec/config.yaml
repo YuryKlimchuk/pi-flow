@@ -9,8 +9,8 @@ context: |
   - OpenSpec is the working approach, not a system participant.
   - Workflow stages are provisional; their number and structure are not final.
   - Agent roles are roles of the same Pi Coding Agent; the concrete role set is not fixed.
-  - Spring <-> agent communication mechanism and persistence technology are unresolved;
-    leave them undecided until a dedicated change.
+  - Spring <-> agent communication uses Pi's JSON mode (`pi --mode json`); persistence
+    technology is unresolved and should stay undecided until a dedicated change.
   - Architecture docs live in docs/system-overview.md and docs/workflow.md; keep them
     consistent with each other and with the decisions above.
   - Write artifacts and docs in English.

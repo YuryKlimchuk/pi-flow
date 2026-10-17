@@ -2,7 +2,9 @@
 
 The end-to-end pi-flow workflow, step by step, with the actions of each participant.
 
-> **Provisional.** The stages below and their number are not final and may change. Agent roles are roles of the same Pi Coding Agent, not separate services. The Spring ↔ agent communication mechanism and the persistence technology are deliberately out of scope for now (see Open questions).
+> **Provisional.** The stages below and their number are not final and may change. Agent roles are roles of the same Pi Coding Agent, not separate services. The persistence technology is deliberately out of scope for now (see Open questions).
+>
+> **Stage delegation:** each stage is delegated to Pi in JSON mode (`pi --mode json`), with the orchestrator consuming the JSONL event stream to capture structured stage outcomes.
 
 ## Stages
 
@@ -145,6 +147,5 @@ These states are conceptual only; how they are represented is intentionally not 
 ## Open questions
 
 - **Agent roles** — the concrete set of per-stage roles is not fixed yet; roles are roles of the same Pi Coding Agent, not separate services.
-- **Spring ↔ agent communication** — the mechanism by which the orchestrator invokes and talks to the agent is bracketed out for this step.
 - **Persistence technology** — the concrete storage behind "Workflow state storage" (embedded database vs file) is unresolved.
 - **Retry / correction limits** — the loops above are conceptual; the number of revision/correction rounds is not decided.
