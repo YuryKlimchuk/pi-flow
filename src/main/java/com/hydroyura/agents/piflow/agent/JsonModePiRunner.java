@@ -1,0 +1,148 @@
+package com.hydroyura.agents.piflow.agent;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.TimeUnit;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+/**
+ * Runs Pi as a child process in JSON mode and assembles its JSONL output.
+ */
+@Service
+public class JsonModePiRunner implements PiRunner {
+
+    private static final Logger log = LoggerFactory.getLogger(JsonModePiRunner.class);
+
+    private final PiProperties properties;
+
+    public JsonModePiRunner(PiProperties properties) {
+        this.properties = Objects.requireNonNull(properties, "properties must not be null");
+    }
+
+    @Override
+    public PiRunResult run(String prompt) {
+        Objects.requireNonNull(prompt, "prompt must not be null");
+
+        List<String> command = List.of(properties.command(), "--mode", "json", prompt);
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        if (properties.workingDirectory() != null && !properties.workingDirectory().isBlank()) {
+            processBuilder.directory(Path.of(properties.workingDirectory()).toFile());
+        }
+        log.info("Starting Pi run: command={}, cwd={}, timeout={}",
+                command, processBuilder.directory(), properties.timeout());
+
+        Process process;
+        try {
+            process = processBuilder.start();
+            // Close the child's stdin (EOF) so Pi does not block reading piped stdin.
+            process.getOutputStream().close();
+        } catch (IOException e) {
+            log.warn("Failed to start Pi process", e);
+            return new PiRunResult(PiRunStatus.FAILURE, "", "Failed to start Pi: " + e.getMessage());
+        }
+
+        PiJsonlParser parser = new PiJsonlParser();
+        StringBuilder stderr = new StringBuilder();
+
+        Thread stdoutThread = startStdoutReader(process, parser);
+        Thread stderrThread = startStderrReader(process, stderr);
+
+        boolean finished;
+        try {
+            finished = process.waitFor(properties.timeout().toMillis(), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            destroyTree(process);
+            joinQuietly(stdoutThread, stderrThread);
+            log.warn("Interrupted while waiting for Pi");
+            return new PiRunResult(PiRunStatus.FAILURE, parser.finalText(), "Interrupted while waiting for Pi");
+        }
+
+        if (!finished) {
+            destroyTree(process);
+            joinQuietly(stdoutThread, stderrThread);
+            log.warn("Pi run timed out after {}", properties.timeout());
+            return new PiRunResult(PiRunStatus.TIMEOUT, parser.finalText(), stderr.toString().trim());
+        }
+
+        joinQuietly(stdoutThread, stderrThread);
+        int exitCode = process.exitValue();
+        PiRunResult result = toResult(parser, exitCode, stderr);
+        log.info("Pi run finished: exitCode={}, status={}, finalText={}, diagnostics={}",
+                exitCode, result.status(), truncate(result.finalText()), result.diagnostics());
+        return result;
+    }
+
+    private Thread startStdoutReader(Process process, PiJsonlParser parser) {
+        Thread thread = new Thread(() -> {
+            try (BufferedReader reader =
+                         new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    parser.accept(line);
+                }
+            } catch (IOException ignored) {
+                // stream closed, e.g. after destroy
+            }
+        }, "pi-stdout");
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
+    }
+
+    private Thread startStderrReader(Process process, StringBuilder stderr) {
+        Thread thread = new Thread(() -> {
+            try (BufferedReader reader =
+                         new BufferedReader(new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    stderr.append(line).append('\n');
+                }
+            } catch (IOException ignored) {
+                // stream closed, e.g. after destroy
+            }
+        }, "pi-stderr");
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
+    }
+
+    private PiRunResult toResult(PiJsonlParser parser, int exitCode, StringBuilder stderr) {
+        PiRunStatus status = (exitCode != 0 || parser.failed()) ? PiRunStatus.FAILURE : PiRunStatus.SUCCESS;
+        String diagnostics = stderr.toString().trim();
+        if (diagnostics.isEmpty() && parser.failureReason() != null) {
+            diagnostics = parser.failureReason();
+        }
+        return new PiRunResult(status, parser.finalText(), diagnostics);
+    }
+
+    private void destroyTree(Process process) {
+        process.descendants().forEach(ProcessHandle::destroyForcibly);
+        process.destroyForcibly();
+    }
+
+    private void joinQuietly(Thread... threads) {
+        for (Thread thread : threads) {
+            try {
+                thread.join(Duration.ofSeconds(5).toMillis());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private static String truncate(String s) {
+        if (s == null || s.length() <= 200) {
+            return s;
+        }
+        return s.substring(0, 200) + "...";
+    }
+}
