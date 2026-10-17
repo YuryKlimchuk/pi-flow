@@ -1,13 +1,19 @@
 schema: spec-driven
 
-# Project context (optional)
-# Add only constraints that should guide OpenSpec artifacts and workflows.
-# Include constraints an agent cannot infer by reading the code.
-# Keep general project documentation and discoverable codebase facts out.
-# Example:
-#   context: |
-#     Designs and tasks must cover Windows, macOS, and Linux
-#     Write all artifacts in Spanish
+context: |
+  pi-flow is a local workflow orchestrator (Spring Boot + Spring Shell, Java 27)
+  that coordinates Pi Coding Agent sessions through a human-gated, OpenSpec-driven
+  workflow. The project itself is developed via OpenSpec.
+
+  Constraints for artifacts and workflows:
+  - OpenSpec is the working approach, not a system participant.
+  - Workflow stages are provisional; their number and structure are not final.
+  - Agent roles are roles of the same Pi Coding Agent; the concrete role set is not fixed.
+  - Spring <-> agent communication mechanism and persistence technology are unresolved;
+    leave them undecided until a dedicated change.
+  - Architecture docs live in docs/system-overview.md and docs/workflow.md; keep them
+    consistent with each other and with the decisions above.
+  - Write artifacts and docs in English.
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.

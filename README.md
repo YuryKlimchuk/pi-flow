@@ -4,13 +4,22 @@
 
 The goal is to provide a reproducible, controlled development workflow in which each stage has a clear responsibility, produces explicit artifacts, and is validated before the process moves forward.
 
+## Documentation
+
+The base architecture is captured in:
+
+- [`docs/system-overview.md`](docs/system-overview.md) — system participants and their relationships.
+- [`docs/workflow.md`](docs/workflow.md) — workflow, stage outcomes, and open questions.
+
+These are the reference for implementation; the workflow and its stages are provisional and may change.
+
 ## Goals
 
 - Orchestrate software development through a predefined sequence of stages.
 - Integrate with Pi Coding Agent from a Java application.
 - Use OpenSpec to define, review, and validate proposed changes before implementation.
 - Preserve human control over important decisions and approval gates.
-- Track workflow execution, stage results, and failures.
+- Track workflow execution, stage outcomes, and failures.
 - Keep the architecture simple and extensible.
 
 ## Core principles
@@ -41,15 +50,17 @@ Integration boundaries should allow future changes to agent invocation, context 
 
 ## Intended workflow
 
+> The stages below are provisional and their number is not final (see [`docs/workflow.md`](docs/workflow.md)).
+
 1. **Task setup** — the user provides a task description and the path to an existing Git repository.
-2. **Project analysis** — an Analyst stage examines the project and returns findings.
-3. **Change proposal** — an Architect stage prepares the relevant OpenSpec artifacts.
-4. **Validation and approval** — the orchestrator checks the expected artifacts and their validity. The user reviews the proposal and approves it or requests revisions.
-5. **Implementation** — a Developer stage implements the approved change.
+2. **Project analysis** — an agent session examines the project and returns findings.
+3. **Change proposal** — an agent session prepares the relevant OpenSpec artifacts.
+4. **Validation and approval** — the orchestrator checks the expected artifacts and their validity. The user reviews the proposal and approves it, requests revisions, or rejects it.
+5. **Implementation** — an agent session implements the approved change.
 6. **Automated verification** — the orchestrator runs the configured tests and checks.
-7. **Review** — a Reviewer stage evaluates the implementation against the task, approved OpenSpec artifacts, code changes, and verification results.
-8. **Corrections** — when necessary, implementation and verification are repeated.
-9. **Completion** — the user reviews the result, and the orchestrator records the workflow outcome.
+7. **Review** — an agent session evaluates the implementation against the task, approved OpenSpec artifacts, code changes, and verification results.
+8. **Corrections** — when necessary, implementation, verification, and review are repeated.
+9. **Completion** — after successful verification and review, the user accepts the result or requests further work; the orchestrator records the workflow outcome.
 
 The workflow may evolve as implementation details and practical limitations are discovered.
 
@@ -57,20 +68,18 @@ The workflow may evolve as implementation details and practical limitations are 
 
 **Spring Boot orchestrator**
 - Manages workflow state and stage transitions.
-- Starts Pi Coding Agent sessions and collects their results.
-- Performs deterministic checks and invokes configured validation commands.
+- Delegates each stage's work to a Pi Coding Agent session and collects the results.
+- Performs deterministic checks and artifact validation.
 - Enforces approval gates and records execution outcomes.
 
 **Pi Coding Agent**
-- Performs the work assigned to the current stage.
-- Operates under stage-specific instructions and the context supplied by the orchestrator.
+- Performs the work assigned to the current stage under a distinct workflow role and stage-specific instructions.
 - Produces analysis, OpenSpec artifacts, implementation changes, or review findings as appropriate.
 
-Analyst, Architect, Developer, and Reviewer are workflow roles, not separate system services.
+Each stage runs as a role of the same Pi Coding Agent, not as a separate service. The concrete role set is not fixed yet.
 
-**OpenSpec**
-- Provides structured artifacts for proposing and describing changes.
-- Supports the validation of change artifacts before implementation.
+**Workflow state storage**
+- Persists workflow state, stage outcomes, approval decisions, and failures — execution metadata, not copies of repository artifacts.
 
 **User**
 - Defines the task and selects the target repository.
@@ -80,6 +89,8 @@ Analyst, Architect, Developer, and Reviewer are workflow roles, not separate sys
 **Target Git repository**
 - Contains the application being changed.
 - Is separate from the `pi-flow` repository itself.
+
+OpenSpec is the working approach the orchestrator and the agent follow, not a separate participant: it provides the structured artifact format for proposing and describing changes and supports their validation before implementation.
 
 ## Initial scope
 
