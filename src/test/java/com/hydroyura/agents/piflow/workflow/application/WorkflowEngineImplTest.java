@@ -11,6 +11,9 @@ import com.hydroyura.agents.piflow.workflow.api.WorkflowId;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStage;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStatus;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowView;
+import com.hydroyura.agents.piflow.workflow.diagnostics.DiagnosticCategory;
+import com.hydroyura.agents.piflow.workflow.diagnostics.DiagnosticEntry;
+import com.hydroyura.agents.piflow.workflow.diagnostics.DiagnosticsProperties;
 import com.hydroyura.agents.piflow.workflow.domain.Workflow;
 import com.hydroyura.agents.piflow.workflow.infrastructure.ChangeArtifactFingerprint;
 import com.hydroyura.agents.piflow.workflow.infrastructure.CommandVerifier;
@@ -18,6 +21,9 @@ import com.hydroyura.agents.piflow.workflow.infrastructure.GitWorktreeCheck;
 import com.hydroyura.agents.piflow.workflow.infrastructure.InMemoryWorkflowRepository;
 import com.hydroyura.agents.piflow.workflow.infrastructure.OpenSpecChangeResolver;
 import com.hydroyura.agents.piflow.workflow.infrastructure.VerificationProperties;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -29,6 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
 
 class WorkflowEngineImplTest {
 
@@ -47,6 +54,7 @@ class WorkflowEngineImplTest {
     private final StageRunner alwaysPass = passWithProposal();
     private final Verifier alwaysVerify = workflow -> VerificationResult.passed("verification passed", false);
     private final RetryProperties retryProperties = new RetryProperties(null, null);
+    private final DiagnosticsProperties diagnosticsProperties = new DiagnosticsProperties(null, null);
 
     @BeforeEach
     void setUp() throws Exception {
@@ -84,18 +92,24 @@ class WorkflowEngineImplTest {
 
     private WorkflowEngineImpl engine(StageRunner runner, Verifier verifier) {
         return new WorkflowEngineImpl(repository, runner, verifier, worktreeCheck, resolverOk, validatorOk, fingerprint,
-                retryProperties);
+                retryProperties, diagnosticsProperties);
     }
 
     private WorkflowEngineImpl engine(StageRunner runner, Verifier verifier,
                                       ChangeResolver resolver, ChangeValidator validator) {
         return new WorkflowEngineImpl(repository, runner, verifier, worktreeCheck, resolver, validator, fingerprint,
-                retryProperties);
+                retryProperties, diagnosticsProperties);
     }
 
     private WorkflowEngineImpl engine(StageRunner runner, Verifier verifier, RetryProperties retryProperties) {
         return new WorkflowEngineImpl(repository, runner, verifier, worktreeCheck, resolverOk, validatorOk, fingerprint,
-                retryProperties);
+                retryProperties, diagnosticsProperties);
+    }
+
+    private WorkflowEngineImpl engine(StageRunner runner, Verifier verifier, RetryProperties retryProperties,
+                                      DiagnosticsProperties diagnosticsProperties) {
+        return new WorkflowEngineImpl(repository, runner, verifier, worktreeCheck, resolverOk, validatorOk, fingerprint,
+                retryProperties, diagnosticsProperties);
     }
 
     private Workflow loaded(WorkflowId id) {
@@ -1470,6 +1484,120 @@ class WorkflowEngineImplTest {
                 .isInstanceOf(IllegalStateException.class);
 
         assertThat(engine.status(failedId).status()).isEqualTo(WorkflowStatus.FAILED);
+    }
+
+    // --- 8. Diagnostics recording (change 16) ---
+
+    @Test
+    void diagnostics_successfulProjectAnalysis_recordsSuccessSequence1() {
+        WorkflowEngineImpl engine = engine(alwaysPass, alwaysVerify);
+        WorkflowView view = engine.start("task", targetRepo.toString());
+
+        List<DiagnosticEntry> projectAnalysis = loaded(view.id()).diagnostics().entries().stream()
+                .filter(e -> e.stage() == WorkflowStage.PROJECT_ANALYSIS)
+                .toList();
+
+        assertThat(projectAnalysis).hasSize(1);
+        assertThat(projectAnalysis.getFirst().attemptSequence()).isEqualTo(1);
+        assertThat(projectAnalysis.getFirst().category()).isEqualTo(DiagnosticCategory.SUCCESS);
+    }
+
+    @Test
+    void diagnostics_technicalFailureAndContentCorrection_sameStage_distinctCategories() {
+        AtomicInteger reviewCalls = new AtomicInteger();
+        StageRunner runner = (stage, workflow, context) -> {
+            if (stage == WorkflowStage.REVIEW) {
+                int call = reviewCalls.getAndIncrement();
+                return switch (call) {
+                    case 0 -> StageOutcome.failure(stage, "reviewer crashed");
+                    case 1 -> StageOutcome.reviewed(stage, "needs corrections", ReviewVerdict.CHANGES_REQUIRED, List.of("fix"));
+                    default -> StageOutcome.reviewed(stage, "ok", ReviewVerdict.APPROVED, List.of());
+                };
+            }
+            return stage == WorkflowStage.CHANGE_PROPOSAL
+                    ? StageOutcome.changeProposed(stage, "ok", CHANGE_ID)
+                    : StageOutcome.success(stage, "ok");
+        };
+        WorkflowEngineImpl engine = engine(runner, alwaysVerify);
+        WorkflowView view = engine.start("task", targetRepo.toString());
+        view = engine.approve(view.id());
+        view = engine.retryStage(view.id(), false);
+
+        List<DiagnosticEntry> reviews = loaded(view.id()).diagnostics().entries().stream()
+                .filter(e -> e.stage() == WorkflowStage.REVIEW)
+                .toList();
+
+        assertThat(reviews).anySatisfy(e -> assertThat(e.category()).isEqualTo(DiagnosticCategory.TECHNICAL_FAILURE));
+        assertThat(reviews).anySatisfy(e -> assertThat(e.category()).isEqualTo(DiagnosticCategory.CONTENT_CORRECTION));
+    }
+
+    @Test
+    void diagnostics_retryAttempt_sequenceMatchesOutcomesHistory() {
+        AtomicInteger reviewCalls = new AtomicInteger();
+        StageRunner runner = (stage, workflow, context) -> {
+            if (stage == WorkflowStage.REVIEW) {
+                return reviewCalls.getAndIncrement() == 0
+                        ? StageOutcome.failure(stage, "reviewer crashed")
+                        : StageOutcome.reviewed(stage, "ok", ReviewVerdict.APPROVED, List.of());
+            }
+            return stage == WorkflowStage.CHANGE_PROPOSAL
+                    ? StageOutcome.changeProposed(stage, "ok", CHANGE_ID)
+                    : StageOutcome.success(stage, "ok");
+        };
+        WorkflowEngineImpl engine = engine(runner, alwaysVerify);
+        WorkflowView view = engine.start("task", targetRepo.toString());
+        view = engine.approve(view.id());
+        view = engine.retryStage(view.id(), false);
+
+        Workflow workflow = loaded(view.id());
+        List<StageOutcome> reviewOutcomes = workflow.outcomes().stream()
+                .filter(o -> o.stage() == WorkflowStage.REVIEW)
+                .toList();
+        List<DiagnosticEntry> reviewDiagnostics = workflow.diagnostics().entries().stream()
+                .filter(e -> e.stage() == WorkflowStage.REVIEW)
+                .toList();
+
+        assertThat(reviewOutcomes).hasSize(2);
+        assertThat(reviewDiagnostics).hasSize(2);
+        assertThat(reviewDiagnostics.getFirst().attemptSequence()).isEqualTo(1);
+        assertThat(reviewDiagnostics.getLast().attemptSequence()).isEqualTo(2);
+        assertThat(reviewDiagnostics.getLast().attemptSequence())
+                .isEqualTo(reviewOutcomes.indexOf(reviewOutcomes.getLast()) + 1);
+    }
+
+    @Test
+    void diagnostics_eachEntry_logsOneInfoLineWithoutSecretOutput() {
+        String secretOutput = "sk-FAKE-API-KEY-12345";
+        StageRunner runner = (stage, workflow, context) -> switch (stage) {
+            case PROJECT_ANALYSIS -> StageOutcome.success(stage, "SECRET-OUTPUT-" + secretOutput);
+            case CHANGE_PROPOSAL -> StageOutcome.changeProposed(stage, "ok", CHANGE_ID);
+            case REVIEW -> StageOutcome.reviewed(stage, "ok", ReviewVerdict.APPROVED, List.of());
+            default -> StageOutcome.success(stage, "ok");
+        };
+
+        Logger logger = (Logger) LoggerFactory.getLogger(WorkflowEngineImpl.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            WorkflowEngineImpl engine = engine(runner, alwaysVerify);
+            WorkflowView view = engine.start("task", targetRepo.toString());
+
+            int entryCount = loaded(view.id()).diagnostics().entries().size();
+            List<String> diagnosticLogs = appender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .filter(m -> m.contains("Diagnostic entry:"))
+                    .toList();
+
+            assertThat(entryCount).isPositive();
+            assertThat(diagnosticLogs).hasSize(entryCount);
+            assertThat(diagnosticLogs).allSatisfy(m -> {
+                assertThat(m).contains("stage=", "attempt=", "category=", "duration=");
+                assertThat(m).doesNotContain(secretOutput);
+            });
+        } finally {
+            logger.detachAppender(appender);
+        }
     }
 
     // --- helpers ---

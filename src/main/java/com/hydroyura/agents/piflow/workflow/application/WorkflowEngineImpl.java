@@ -7,16 +7,27 @@ import com.hydroyura.agents.piflow.workflow.api.WorkflowEngine;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowId;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStage;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStatus;
+import com.hydroyura.agents.piflow.workflow.api.DiagnosticEntryView;
+import com.hydroyura.agents.piflow.workflow.api.WorkflowDiagnosticsView;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowView;
+import com.hydroyura.agents.piflow.workflow.diagnostics.DiagnosticCategory;
+import com.hydroyura.agents.piflow.workflow.diagnostics.DiagnosticEntry;
+import com.hydroyura.agents.piflow.workflow.diagnostics.DiagnosticsProperties;
+import com.hydroyura.agents.piflow.workflow.diagnostics.WorkflowDiagnostics;
 import com.hydroyura.agents.piflow.workflow.domain.Workflow;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /** Hand-rolled enum state machine driving the pi-flow workflow synchronously. */
 @Service
+@Slf4j
 public class WorkflowEngineImpl implements WorkflowEngine {
 
     /**
@@ -34,11 +45,12 @@ public class WorkflowEngineImpl implements WorkflowEngine {
     private final ChangeValidator changeValidator;
     private final ArtifactFingerprint fingerprint;
     private final RetryProperties retryProperties;
+    private final DiagnosticsProperties diagnosticsProperties;
 
     public WorkflowEngineImpl(WorkflowRepository repository, StageRunner stageRunner, Verifier verifier,
                               WorktreeCheck worktreeCheck, ChangeResolver changeResolver,
                               ChangeValidator changeValidator, ArtifactFingerprint fingerprint,
-                              RetryProperties retryProperties) {
+                              RetryProperties retryProperties, DiagnosticsProperties diagnosticsProperties) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.stageRunner = Objects.requireNonNull(stageRunner, "stageRunner must not be null");
         this.verifier = Objects.requireNonNull(verifier, "verifier must not be null");
@@ -47,6 +59,7 @@ public class WorkflowEngineImpl implements WorkflowEngine {
         this.changeValidator = Objects.requireNonNull(changeValidator, "changeValidator must not be null");
         this.fingerprint = Objects.requireNonNull(fingerprint, "fingerprint must not be null");
         this.retryProperties = Objects.requireNonNull(retryProperties, "retryProperties must not be null");
+        this.diagnosticsProperties = Objects.requireNonNull(diagnosticsProperties, "diagnosticsProperties must not be null");
     }
 
     @Override
@@ -54,7 +67,7 @@ public class WorkflowEngineImpl implements WorkflowEngine {
         if (!worktreeCheck.isGitWorktree(Path.of(targetRepo))) {
             throw new IllegalStateException("Target repository is not a Git worktree: " + targetRepo);
         }
-        Workflow workflow = new Workflow(WorkflowId.generate(), task, targetRepo);
+        Workflow workflow = new Workflow(WorkflowId.generate(), task, targetRepo, diagnosticsProperties);
         repository.save(workflow);
         advance(workflow);
         return view(workflow);
@@ -63,6 +76,16 @@ public class WorkflowEngineImpl implements WorkflowEngine {
     @Override
     public WorkflowView status(WorkflowId id) {
         return view(require(id));
+    }
+
+    @Override
+    public WorkflowDiagnosticsView diagnostics(WorkflowId id) {
+        Workflow workflow = require(id);
+        WorkflowDiagnostics diagnostics = workflow.diagnostics();
+        List<DiagnosticEntryView> entries = diagnostics.entries().stream()
+                .map(WorkflowEngineImpl::toView)
+                .toList();
+        return new WorkflowDiagnosticsView(workflow.getId(), diagnostics.entriesDropped(), entries);
     }
 
     @Override
@@ -159,37 +182,25 @@ public class WorkflowEngineImpl implements WorkflowEngine {
                 }
                 case PROJECT_ANALYSIS -> {
                     StageContext context = buildStageContext(workflow);
-                    StageOutcome outcome;
-                    try {
-                        outcome = stageRunner.run(stage, workflow, context);
-                    } catch (RuntimeException e) {
-                        handleTechnicalFailure(workflow, StageOutcome.failure(stage, failureMessage(e)));
-                        break;
-                    }
-                    if (outcome.success()) {
-                        recordOutcome(workflow, outcome);
+                    TimedOutcome timed = dispatch(stage, () -> stageRunner.run(stage, workflow, context));
+                    if (timed.outcome().success()) {
+                        recordOutcome(workflow, timed.outcome());
                         workflow.moveTo(WorkflowStage.CHANGE_PROPOSAL);
                     } else {
-                        handleTechnicalFailure(workflow, outcome);
+                        handleTechnicalFailure(workflow, timed.outcome());
                     }
+                    recordAttempt(workflow, timed.startedAt(), timed.finishedAt());
                 }
                 case CHANGE_PROPOSAL -> handleChangeProposal(workflow);
                 case IMPLEMENTATION -> handleImplementation(workflow);
                 case REVIEW -> {
                     StageContext context = buildStageContext(workflow);
-                    StageOutcome outcome;
-                    try {
-                        outcome = stageRunner.run(stage, workflow, context);
-                    } catch (RuntimeException e) {
-                        handleTechnicalFailure(workflow, StageOutcome.failure(stage, failureMessage(e)));
-                        break;
-                    }
+                    TimedOutcome timed = dispatch(stage, () -> stageRunner.run(stage, workflow, context));
+                    StageOutcome outcome = timed.outcome();
                     if (outcome.success() && outcome.verdict().isEmpty()) {
                         handleTechnicalFailure(workflow, StageOutcome.failure(stage,
                                 "REVIEW stage succeeded without a ReviewVerdict (invariant violation)"));
-                        break;
-                    }
-                    if (!outcome.success()) {
+                    } else if (!outcome.success()) {
                         handleTechnicalFailure(workflow, outcome);
                     } else if (outcome.verdict().orElseThrow() == ReviewVerdict.APPROVED) {
                         recordOutcome(workflow, outcome);
@@ -197,6 +208,7 @@ public class WorkflowEngineImpl implements WorkflowEngine {
                     } else {
                         handleContentCorrection(workflow, outcome);
                     }
+                    recordAttempt(workflow, timed.startedAt(), timed.finishedAt());
                 }
                 case VALIDATION_APPROVAL -> {
                     recordGateFingerprint(workflow);
@@ -204,26 +216,28 @@ public class WorkflowEngineImpl implements WorkflowEngine {
                 }
                 case ACCEPTANCE -> workflow.markAwaitingUser();
                 case VERIFICATION -> {
-                    VerificationResult result;
-                    try {
-                        result = verifier.verify(workflow);
-                    } catch (RuntimeException e) {
-                        handleTechnicalFailure(workflow, StageOutcome.failure(stage, failureMessage(e)));
-                        break;
-                    }
-                    StageOutcome outcome = StageOutcome.verified(stage, result.report(), result.status());
-                    switch (result.status()) {
-                        case PASSED -> {
-                            recordOutcome(workflow, outcome);
-                            workflow.moveTo(WorkflowStage.REVIEW);
+                    TimedOutcome timed = dispatch(stage, () -> {
+                        VerificationResult result = verifier.verify(workflow);
+                        return StageOutcome.verified(stage, result.report(), result.status());
+                    });
+                    StageOutcome outcome = timed.outcome();
+                    if (outcome.verificationStatus().isEmpty()) {
+                        handleTechnicalFailure(workflow, outcome);
+                    } else {
+                        switch (outcome.verificationStatus().orElseThrow()) {
+                            case PASSED -> {
+                                recordOutcome(workflow, outcome);
+                                workflow.moveTo(WorkflowStage.REVIEW);
+                            }
+                            case FAILED -> handleContentCorrection(workflow, outcome);
+                            case NOT_CONFIGURED -> {
+                                recordOutcome(workflow, outcome);
+                                workflow.markAwaitingUser();
+                            }
+                            case INFRASTRUCTURE_ERROR -> handleTechnicalFailure(workflow, outcome);
                         }
-                        case FAILED -> handleContentCorrection(workflow, outcome);
-                        case NOT_CONFIGURED -> {
-                            recordOutcome(workflow, outcome);
-                            workflow.markAwaitingUser();
-                        }
-                        case INFRASTRUCTURE_ERROR -> handleTechnicalFailure(workflow, outcome);
                     }
+                    recordAttempt(workflow, timed.startedAt(), timed.finishedAt());
                 }
                 case COMPLETED -> workflow.markCompleted();
             }
@@ -234,18 +248,15 @@ public class WorkflowEngineImpl implements WorkflowEngine {
     private void handleChangeProposal(Workflow workflow) {
         WorkflowStage stage = WorkflowStage.CHANGE_PROPOSAL;
         StageContext context = buildStageContext(workflow);
-        StageOutcome outcome;
-        try {
-            outcome = stageRunner.run(stage, workflow, context);
-        } catch (RuntimeException e) {
-            handleTechnicalFailure(workflow, StageOutcome.failure(stage, failureMessage(e)));
-            return;
-        }
+        TimedOutcome timed = dispatch(stage, () -> stageRunner.run(stage, workflow, context));
+        StageOutcome outcome = timed.outcome();
         if (!outcome.success()) {
             handleTechnicalFailure(workflow, outcome);
+            recordAttempt(workflow, timed.startedAt(), timed.finishedAt());
             return;
         }
         recordOutcome(workflow, outcome);
+        recordAttempt(workflow, timed.startedAt(), timed.finishedAt());
 
         String candidate = outcome.changeId().orElse(null);
         if (candidate == null || candidate.isBlank()) {
@@ -295,19 +306,15 @@ public class WorkflowEngineImpl implements WorkflowEngine {
 
         WorkflowStage stage = WorkflowStage.IMPLEMENTATION;
         StageContext context = buildStageContext(workflow);
-        StageOutcome outcome;
-        try {
-            outcome = stageRunner.run(stage, workflow, context);
-        } catch (RuntimeException e) {
-            handleTechnicalFailure(workflow, StageOutcome.failure(stage, failureMessage(e)));
-            return;
-        }
+        TimedOutcome timed = dispatch(stage, () -> stageRunner.run(stage, workflow, context));
+        StageOutcome outcome = timed.outcome();
         if (outcome.success()) {
             recordOutcome(workflow, outcome);
             workflow.moveTo(WorkflowStage.VERIFICATION);
         } else {
             handleTechnicalFailure(workflow, outcome);
         }
+        recordAttempt(workflow, timed.startedAt(), timed.finishedAt());
     }
 
     /**
@@ -462,6 +469,81 @@ public class WorkflowEngineImpl implements WorkflowEngine {
         return e.getClass().getSimpleName() + (message == null ? "" : ": " + message);
     }
 
+    private record TimedOutcome(StageOutcome outcome, Instant startedAt, Instant finishedAt) {
+    }
+
+    /** Times a stage dispatch, converting an uncaught runtime failure into a failed outcome. */
+    private TimedOutcome dispatch(WorkflowStage stage, Supplier<StageOutcome> run) {
+        Instant startedAt = Instant.now();
+        try {
+            return new TimedOutcome(run.get(), startedAt, Instant.now());
+        } catch (RuntimeException e) {
+            return new TimedOutcome(StageOutcome.failure(stage, failureMessage(e)), startedAt, Instant.now());
+        }
+    }
+
+    /**
+     * Records one diagnostic entry for the just-recorded stage attempt, reading the attempt
+     * sequence number and category back from plan 15's outcome history rather than a parallel counter.
+     */
+    private void recordAttempt(Workflow workflow, Instant startedAt, Instant finishedAt) {
+        StageOutcome outcome = lastOutcome(workflow).orElseThrow(
+                () -> new IllegalStateException("cannot record a diagnostic entry without a recorded outcome"));
+        int attemptSequence = (int) workflow.outcomes().stream()
+                .filter(o -> o.stage() == outcome.stage())
+                .count();
+        DiagnosticCategory category = categoryFor(outcome);
+        DiagnosticEntry entry = DiagnosticEntry.of(
+                outcome.stage(),
+                attemptSequence,
+                startedAt,
+                Duration.between(startedAt, finishedAt),
+                category,
+                statusFor(outcome),
+                diagnosticTextFor(outcome),
+                diagnosticsProperties.maxReasonLength());
+        workflow.recordDiagnostic(entry);
+        log.info("Diagnostic entry: stage={}, attempt={}, category={}, duration={}",
+                entry.stage(), entry.attemptSequence(), entry.category(), entry.duration());
+    }
+
+    private static DiagnosticCategory categoryFor(StageOutcome outcome) {
+        if (outcome.verdict().isPresent()) {
+            return switch (outcome.verdict().orElseThrow()) {
+                case APPROVED -> DiagnosticCategory.SUCCESS;
+                case CHANGES_REQUIRED -> DiagnosticCategory.CONTENT_CORRECTION;
+            };
+        }
+        if (outcome.verificationStatus().isPresent()) {
+            return switch (outcome.verificationStatus().orElseThrow()) {
+                case PASSED -> DiagnosticCategory.SUCCESS;
+                case FAILED -> DiagnosticCategory.CONTENT_CORRECTION;
+                case NOT_CONFIGURED -> DiagnosticCategory.NOT_CONFIGURED;
+                case INFRASTRUCTURE_ERROR -> DiagnosticCategory.TECHNICAL_FAILURE;
+            };
+        }
+        if (outcome.attemptKind() == AttemptKind.CONTENT_CORRECTION) {
+            return DiagnosticCategory.CONTENT_CORRECTION;
+        }
+        return outcome.success() ? DiagnosticCategory.SUCCESS : DiagnosticCategory.TECHNICAL_FAILURE;
+    }
+
+    private static String statusFor(StageOutcome outcome) {
+        if (outcome.verdict().isPresent()) {
+            return outcome.verdict().orElseThrow().name();
+        }
+        return outcome.verificationStatus().map(Enum::name).orElse(null);
+    }
+
+    private static String diagnosticTextFor(StageOutcome outcome) {
+        // Only VERIFICATION outcomes carry process/protocol-scoped report text in output();
+        // every other stage's output() is agent final text (or a leak-risk string).
+        if (outcome.stage() == WorkflowStage.VERIFICATION && outcome.verificationStatus().isPresent()) {
+            return outcome.output();
+        }
+        return null;
+    }
+
     private Workflow require(WorkflowId id) {
         return repository.findById(id)
                 .orElseThrow(() -> new IllegalStateException("Unknown workflow: " + id.value()));
@@ -470,5 +552,10 @@ public class WorkflowEngineImpl implements WorkflowEngine {
     private WorkflowView view(Workflow workflow) {
         return new WorkflowView(workflow.getId(), workflow.getTask(), workflow.getTargetRepo(),
                 workflow.getCurrentStage(), workflow.getStatus(), workflow.outcomes());
+    }
+
+    private static DiagnosticEntryView toView(DiagnosticEntry entry) {
+        return new DiagnosticEntryView(entry.stage(), entry.attemptSequence(), entry.startedAt(),
+                entry.duration(), entry.category().name(), entry.reason(), entry.reasonTruncated());
     }
 }

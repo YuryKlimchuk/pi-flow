@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.hydroyura.agents.piflow.agent.api.PiRunResult;
 import com.hydroyura.agents.piflow.agent.api.PiRunStatus;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -15,6 +18,7 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 
 class JsonModePiRunnerTest {
@@ -331,6 +335,29 @@ class JsonModePiRunnerTest {
                 .contains("Failed to start Pi")
                 .doesNotContain("timed out")
                 .doesNotContain("empty stream");
+    }
+
+    @Test
+    void logLines_shouldNotContainPromptOrFinalText() {
+        String prompt = "FIXTURE-PROMPT-DO-NOT-LOG";
+        Logger logger = (Logger) LoggerFactory.getLogger(JsonModePiRunner.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            PiRunResult result = runner(fakePi).run(prompt);
+            assertThat(result.status()).isEqualTo(PiRunStatus.SUCCESS);
+
+            List<String> logs = appender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .toList();
+            assertThat(logs).anyMatch(m -> m.contains("Starting Pi run:"));
+            assertThat(logs).anyMatch(m -> m.contains("Pi run finished:"));
+            assertThat(logs).noneMatch(m -> m.contains(prompt));
+            assertThat(logs).noneMatch(m -> m.contains("Hello world!"));
+        } finally {
+            logger.detachAppender(appender);
+        }
     }
 
     @Test

@@ -48,6 +48,7 @@ pi-flow:
 - Optional overrides live under `pi-flow.agent.*`: `command` (default `pi`), `timeout` (default `5m`), `workingDirectory` (optional default working directory for agent runs).
 - `pi-flow.verification.config-path` (default `.pi-flow/verify.json`) is the only startup-bound verification setting; it configures *where to look* for the per-target-repository verification file, not what to run. The verification command, timeout, and working directory are read fresh from that file on every verification attempt, so they can be changed at runtime without restarting the orchestrator.
 - Retry and correction budgets live under `pi-flow.retry.*`: `max-technical-retries` (default `3`) bounds technical-failure attempts per stage, and `max-content-corrections` (default `5`) bounds content-correction loops per workflow. Both are commented out in `application.yaml` by default; auto-retry is disabled and there is no configuration to enable unattended retry.
+- Diagnostics bounds live under `pi-flow.diagnostics.*`: `max-entries-per-workflow` (default `200`) caps the diagnostic entries retained per workflow, and `max-reason-length` (default `500`) caps each entry's reason string. These are in-memory reporting bounds only; the full attempt history is still available via `flow-status <id>`'s stage outcomes.
 
 ## 3. Target repository prerequisites
 
@@ -87,6 +88,8 @@ Agent Commands
 	pi-run: Run a prompt against Pi in JSON mode
 Built-In Commands
 	clear, help, quit/exit, script, version
+Diagnostics Commands
+	flow-diagnostics: Show a workflow's recorded stage-attempt diagnostics
 Flow Commands
 	flow-approve: Approve the proposal, or accept the final result
 	flow-reject:  Reject the proposal (cancels the workflow)
@@ -161,8 +164,9 @@ After the final `flow-approve`, the workflow reaches `stage=COMPLETED`, `status=
 | After first `flow-approve` | Implementation files exist | the file(s) the task asked for in the target repository |
 | After first `flow-approve` | Review verdict returned | last stage outcome via `flow-status <id>` |
 | After second `flow-approve` | Workflow completed | `flow-status <id>` shows `status=COMPLETED` |
+| At any point | Diagnostic history for a workflow | `flow-diagnostics <id>` lists each retained stage attempt (stage, attempt, duration, category, reason) |
 
-At any point, `flow-status <id>` shows the current `stage` and `status`.
+At any point, `flow-status <id>` shows the current `stage` and `status`, and `flow-diagnostics <id>` shows the bounded per-stage-attempt diagnostic record.
 
 ## 7. Known limitations
 

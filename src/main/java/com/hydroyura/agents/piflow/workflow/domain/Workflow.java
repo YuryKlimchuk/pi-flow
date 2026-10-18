@@ -4,6 +4,9 @@ import com.hydroyura.agents.piflow.workflow.api.StageOutcome;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowId;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStage;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStatus;
+import com.hydroyura.agents.piflow.workflow.diagnostics.DiagnosticsProperties;
+import com.hydroyura.agents.piflow.workflow.diagnostics.DiagnosticEntry;
+import com.hydroyura.agents.piflow.workflow.diagnostics.WorkflowDiagnostics;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -39,12 +42,31 @@ public class Workflow {
     @Getter(AccessLevel.NONE)
     private int contentCorrectionCount = 0;
 
+    @Getter(AccessLevel.NONE)
+    private final WorkflowDiagnostics diagnostics;
+
     public Workflow(WorkflowId id, String task, String targetRepo) {
+        this(id, task, targetRepo, new DiagnosticsProperties(null, null));
+    }
+
+    public Workflow(WorkflowId id, String task, String targetRepo, DiagnosticsProperties diagnosticsProperties) {
         this.id = Objects.requireNonNull(id, "id must not be null");
         this.task = Objects.requireNonNull(task, "task must not be null");
         this.targetRepo = Objects.requireNonNull(targetRepo, "targetRepo must not be null");
         this.currentStage = WorkflowStage.TASK_SETUP;
         this.status = WorkflowStatus.IN_PROGRESS;
+        this.diagnostics = new WorkflowDiagnostics(
+                Objects.requireNonNull(diagnosticsProperties, "diagnosticsProperties must not be null"));
+    }
+
+    /** The bounded, derived diagnostics projection for this workflow. */
+    public WorkflowDiagnostics diagnostics() {
+        return diagnostics;
+    }
+
+    /** Records a diagnostic entry into this workflow's bounded diagnostics projection. */
+    public void recordDiagnostic(DiagnosticEntry entry) {
+        diagnostics.record(entry);
     }
 
     public List<StageOutcome> outcomes() {

@@ -8,6 +8,10 @@ import com.hydroyura.agents.piflow.workflow.api.StageOutcome;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowId;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStage;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStatus;
+import com.hydroyura.agents.piflow.workflow.diagnostics.DiagnosticCategory;
+import com.hydroyura.agents.piflow.workflow.diagnostics.DiagnosticEntry;
+import java.time.Duration;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
 class WorkflowTest {
@@ -148,5 +152,16 @@ class WorkflowTest {
 
         assertThat(workflow.technicalRetryCount()).isZero();
         assertThat(workflow.contentCorrectionCount()).isEqualTo(1);
+    }
+
+    @Test
+    void recordDiagnostic_shouldBeRetrievableViaDiagnosticsAccessor() {
+        Workflow workflow = new Workflow(WorkflowId.generate(), "task", "/repo");
+        DiagnosticEntry entry = DiagnosticEntry.of(WorkflowStage.PROJECT_ANALYSIS, 1,
+                Instant.now(), Duration.ofMillis(1), DiagnosticCategory.SUCCESS, null, null, 500);
+
+        workflow.recordDiagnostic(entry);
+
+        assertThat(workflow.diagnostics().entries()).containsExactly(entry);
     }
 }

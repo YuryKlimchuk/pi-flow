@@ -112,8 +112,8 @@ public class JsonModePiRunner implements PiRunner {
         if (cwd != null && !cwd.isBlank()) {
             processBuilder.directory(Path.of(cwd).toFile());
         }
-        log.info("Starting Pi run: command={}, cwd={}, timeout={}",
-                command, processBuilder.directory(), properties.timeout());
+        log.info("Starting Pi run: executable={}, cwd={}, timeout={}",
+                command.getFirst(), processBuilder.directory(), properties.timeout());
 
         Process process;
         try {
@@ -152,8 +152,8 @@ public class JsonModePiRunner implements PiRunner {
         joinQuietly(stdoutThread, stderrThread);
         int exitCode = process.exitValue();
         PiRunResult result = toResult(parser, exitCode, stderr);
-        log.info("Pi run finished: exitCode={}, status={}, finalText={}, diagnostics={}",
-                exitCode, result.status(), truncate(result.finalText()), result.diagnostics());
+        log.info("Pi run finished: exitCode={}, status={}, diagnostics={}",
+                exitCode, result.status(), result.diagnostics());
         return result;
     }
 
@@ -244,12 +244,5 @@ public class JsonModePiRunner implements PiRunner {
                 Thread.currentThread().interrupt();
             }
         }
-    }
-
-    private static String truncate(String s) {
-        if (s == null || s.length() <= 200) {
-            return s;
-        }
-        return s.substring(0, 200) + "...";
     }
 }
