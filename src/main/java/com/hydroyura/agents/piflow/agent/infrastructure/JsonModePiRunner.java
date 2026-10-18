@@ -3,8 +3,10 @@ package com.hydroyura.agents.piflow.agent.infrastructure;
 import com.hydroyura.agents.piflow.agent.api.PiRunResult;
 import com.hydroyura.agents.piflow.agent.api.PiRunStatus;
 import com.hydroyura.agents.piflow.agent.api.PiRunner;
+import com.hydroyura.agents.piflow.agent.application.AgentResolution;
 import com.hydroyura.agents.piflow.agent.application.AgentResolver;
 import com.hydroyura.agents.piflow.agent.domain.AgentDefinition;
+import com.hydroyura.agents.piflow.agent.domain.Skill;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -15,7 +17,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -46,14 +47,15 @@ public class JsonModePiRunner implements PiRunner {
         Objects.requireNonNull(agentName, "agentName must not be null");
         Objects.requireNonNull(prompt, "prompt must not be null");
 
-        Optional<AgentDefinition> resolved = agentResolver.resolve(agentName);
-        if (resolved.isEmpty()) {
-            log.warn("Unknown agent: {}", agentName);
-            return new PiRunResult(PiRunStatus.FAILURE, "", "Unknown agent: " + agentName);
+        AgentResolution resolution = agentResolver.resolve(agentName);
+        if (!resolution.isResolved()) {
+            log.warn("Failed to resolve agent {}: {}", agentName, resolution.error());
+            return new PiRunResult(PiRunStatus.FAILURE, "", resolution.error());
         }
 
-        AgentDefinition agent = resolved.get();
+        AgentDefinition agent = resolution.definition();
         Path tempPrompt = null;
+        List<Path> tempSkills = new ArrayList<>();
         try {
             List<String> command = new ArrayList<>();
             command.add(properties.command());
@@ -74,19 +76,31 @@ public class JsonModePiRunner implements PiRunner {
                 command.add("--append-system-prompt");
                 command.add(tempPrompt.toString());
             }
+            for (Skill skill : agent.skills()) {
+                Path tempSkill = Files.createTempFile("pi-flow-skill-" + skill.name() + "-", ".md");
+                Files.writeString(tempSkill, skill.content());
+                tempSkills.add(tempSkill);
+                command.add("--skill");
+                command.add(tempSkill.toString());
+            }
             command.add(prompt);
             return runCommand(command, workingDirectory);
         } catch (IOException e) {
-            log.warn("Failed to prepare agent system prompt", e);
-            return new PiRunResult(PiRunStatus.FAILURE, "", "Failed to prepare agent system prompt: " + e.getMessage());
+            log.warn("Failed to prepare agent resources", e);
+            return new PiRunResult(PiRunStatus.FAILURE, "", "Failed to prepare agent resources: " + e.getMessage());
         } finally {
             if (tempPrompt != null) {
-                try {
-                    Files.deleteIfExists(tempPrompt);
-                } catch (IOException ignored) {
-                    // best effort cleanup
-                }
+                deleteQuietly(tempPrompt);
             }
+            tempSkills.forEach(JsonModePiRunner::deleteQuietly);
+        }
+    }
+
+    private static void deleteQuietly(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException ignored) {
+            // best effort cleanup
         }
     }
 

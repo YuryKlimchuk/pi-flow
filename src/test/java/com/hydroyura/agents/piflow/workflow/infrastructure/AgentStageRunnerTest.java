@@ -3,9 +3,10 @@ package com.hydroyura.agents.piflow.workflow.infrastructure;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.hydroyura.agents.piflow.agent.api.PiRunner;
-import com.hydroyura.agents.piflow.agent.infrastructure.FileAgentResolver;
+import com.hydroyura.agents.piflow.agent.infrastructure.AgentProperties;
 import com.hydroyura.agents.piflow.agent.infrastructure.JsonModePiRunner;
 import com.hydroyura.agents.piflow.agent.infrastructure.PiProperties;
+import com.hydroyura.agents.piflow.agent.infrastructure.ResourceAgentResolver;
 import com.hydroyura.agents.piflow.workflow.api.StageOutcome;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowId;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStage;
@@ -15,9 +16,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 
 class AgentStageRunnerTest {
 
@@ -26,16 +28,14 @@ class AgentStageRunnerTest {
 
     @Test
     void run_shouldInvokePiUnderRoleInTargetRepository() throws IOException {
-        Path agentDir = tempDir.resolve("agents");
-        Files.createDirectories(agentDir);
-        Files.writeString(agentDir.resolve("analyst.md"), "---\nname: analyst\n---\nYou are an analyst.\n");
-
         Path targetRepo = tempDir.resolve("target-repo");
         Files.createDirectories(targetRepo);
 
         PiRunner piRunner = new JsonModePiRunner(
                 new PiProperties(cwdPi().toString(), Duration.ofSeconds(10), null),
-                new FileAgentResolver(List.of(agentDir)));
+                new ResourceAgentResolver(
+                        new AgentProperties(Map.of("cheap", "fake-model"), Map.of("analyst", "cheap")),
+                        new PathMatchingResourcePatternResolver()));
         StageRunner runner = new AgentStageRunner(piRunner);
 
         Workflow workflow = new Workflow(WorkflowId.generate(), "task", targetRepo.toString());

@@ -1,18 +1,23 @@
 package com.hydroyura.agents.piflow.agent.infrastructure;
 
-import com.hydroyura.agents.piflow.agent.domain.AgentDefinition;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import org.yaml.snakeyaml.Yaml;
 
-/** Parses a Pi agent markdown file: YAML frontmatter plus a system-prompt body. */
-public final class AgentFileParser {
+/**
+ * Parses a {@code system.md} agent resource: YAML frontmatter ({@code tools}) plus a system-prompt body.
+ */
+public final class SystemPromptParser {
 
-    private AgentFileParser() {
+    private SystemPromptParser() {
     }
 
-    public static AgentDefinition parse(String fileName, String content) {
+    /** Parsed system-prompt resource: the tool allowlist and the prompt body. */
+    public record SystemPrompt(List<String> tools, String body) {
+    }
+
+    public static SystemPrompt parse(String content) {
         String yaml = "";
         String body = content;
         if (content != null && content.startsWith("---")) {
@@ -23,32 +28,14 @@ public final class AgentFileParser {
             }
         }
 
-        Map<String, Object> fm = Map.of();
+        List<String> tools = List.of();
         if (!yaml.isBlank()) {
             Object loaded = new Yaml().load(yaml);
             if (loaded instanceof Map<?, ?> map) {
-                fm = castMap(map);
+                tools = toolsValue(map.get("tools"));
             }
         }
-
-        String name = stringValue(fm.get("name"));
-        if (name == null || name.isBlank()) {
-            name = fileName;
-        }
-        String description = stringValue(fm.get("description"));
-        String model = stringValue(fm.get("model"));
-        List<String> tools = toolsValue(fm.get("tools"));
-
-        return new AgentDefinition(name, description, model, tools, body == null ? "" : body);
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> castMap(Map<?, ?> map) {
-        return (Map<String, Object>) map;
-    }
-
-    private static String stringValue(Object value) {
-        return value == null ? null : String.valueOf(value).trim();
+        return new SystemPrompt(tools, body == null ? "" : body);
     }
 
     private static List<String> toolsValue(Object value) {

@@ -1,3 +1,15 @@
 spring:
   application:
     name: pi-flow
+
+pi-flow:
+  agents:
+    tiers:
+      cheap: deepseek/deepseek-v4-pro
+      medium: anthropic/claude-sonnet-4
+      expensive: anthropic/claude-opus-4
+    roles:
+      analyst: cheap
+      architect: medium
+      developer: expensive
+      reviewer: medium

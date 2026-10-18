@@ -1,19 +1,16 @@
 package com.hydroyura.agents.piflow.agent.infrastructure;
 
 import com.hydroyura.agents.piflow.agent.application.AgentResolver;
-import java.nio.file.Path;
-import java.util.List;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 
-/** Wires the agent resolver with the standard Pi agent directories. */
+/** Wires the resource-based agent resolver. */
 @Configuration
 public class AgentIntegrationConfig {
 
     @Bean
-    AgentResolver agentResolver() {
-        Path projectAgents = Path.of(".pi", "agents");
-        Path userAgents = Path.of(System.getProperty("user.home"), ".pi", "agent", "agents");
-        return new FileAgentResolver(List.of(projectAgents, userAgents));
+    AgentResolver agentResolver(AgentProperties properties) {
+        return new ResourceAgentResolver(properties, new PathMatchingResourcePatternResolver());
     }
 }

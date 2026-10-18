@@ -3,17 +3,18 @@ package com.hydroyura.agents.piflow.agent.domain;
 import java.util.List;
 
 /**
- * A Pi agent definition resolved from a markdown file (YAML frontmatter + system prompt).
+ * A resolved agent: name, resolved model id, tool allowlist, system prompt, and skills.
  *
- * @param name         agent name
- * @param description  short description
- * @param model        model id, or {@code null} to inherit the default
- * @param tools        tool allowlist (empty means "no explicit allowlist")
- * @param systemPrompt role instructions appended to Pi's system prompt
+ * @param name         role name
+ * @param model        resolved model id
+ * @param tools        tool allowlist
+ * @param systemPrompt role system prompt
+ * @param skills       the agent's skills (name + markdown content)
  */
-public record AgentDefinition(String name, String description, String model, List<String> tools, String systemPrompt) {
+public record AgentDefinition(String name, String model, List<String> tools, String systemPrompt, List<Skill> skills) {
 
     public AgentDefinition {
         tools = tools != null ? List.copyOf(tools) : List.of();
+        skills = skills != null ? List.copyOf(skills) : List.of();
     }
 }
