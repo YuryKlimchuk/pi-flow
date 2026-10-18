@@ -20,8 +20,13 @@ public final class PiJsonlParser {
     private boolean settled;
     private boolean failed;
     private String failureReason;
+    private boolean sawAnyLine;
+    private boolean sawParsedLine;
+    private boolean sawRecognizedEvent;
+    private boolean lastAssistantMessageEndError;
 
     public void accept(String line) {
+        sawAnyLine = true;
         JsonNode node;
         try {
             node = MAPPER.readTree(line);
@@ -29,11 +34,21 @@ public final class PiJsonlParser {
             log.debug("Skipping malformed JSONL record: {}", e.getMessage());
             return; // skip malformed JSONL record
         }
+        sawParsedLine = true;
 
         switch (node.path("type").asText()) {
-            case "message_update" -> handleMessageUpdate(node.path("assistantMessageEvent"));
-            case "message_end" -> handleMessageEnd(node.path("message"));
-            case "agent_settled" -> handleSettled(node);
+            case "message_update" -> {
+                sawRecognizedEvent = true;
+                handleMessageUpdate(node.path("assistantMessageEvent"));
+            }
+            case "message_end" -> {
+                sawRecognizedEvent = true;
+                handleMessageEnd(node.path("message"));
+            }
+            case "agent_settled" -> {
+                sawRecognizedEvent = true;
+                handleSettled(node);
+            }
             default -> {
             }
         }
@@ -49,7 +64,9 @@ public final class PiJsonlParser {
         if ("assistant".equals(message.path("role").asText())) {
             authoritativeText = extractText(message.path("content"));
             String stopReason = message.path("stopReason").asText();
-            if ("error".equals(stopReason) || "aborted".equals(stopReason)) {
+            boolean isError = "error".equals(stopReason) || "aborted".equals(stopReason);
+            lastAssistantMessageEndError = isError;
+            if (isError) {
                 failed = true;
                 failureReason = stopReason;
             }
@@ -61,6 +78,11 @@ public final class PiJsonlParser {
         if (node.path("aborted").asBoolean(false)) {
             failed = true;
             failureReason = "aborted";
+        } else if (!lastAssistantMessageEndError) {
+            // A later successful message_end followed by a non-aborted settlement
+            // demonstrates recovery from an earlier intermediate error.
+            failed = false;
+            failureReason = null;
         }
     }
 
@@ -94,5 +116,25 @@ public final class PiJsonlParser {
 
     public String failureReason() {
         return failureReason;
+    }
+
+    /** True once at least one line matched a supported Pi JSON-mode event type. */
+    public boolean supportedProtocolObserved() {
+        return sawRecognizedEvent;
+    }
+
+    /** True once an {@code agent_settled} event has been observed. */
+    public boolean hasRecognizedCompletion() {
+        return settled;
+    }
+
+    /** True once at least one stdout line has been fed to {@link #accept(String)}. */
+    public boolean sawAnyLine() {
+        return sawAnyLine;
+    }
+
+    /** True once at least one line parsed as valid JSON (regardless of its type). */
+    public boolean sawParsedLine() {
+        return sawParsedLine;
     }
 }

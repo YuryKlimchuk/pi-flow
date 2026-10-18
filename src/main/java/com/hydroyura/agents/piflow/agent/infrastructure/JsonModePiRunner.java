@@ -146,7 +146,7 @@ public class JsonModePiRunner implements PiRunner {
             destroyTree(process);
             joinQuietly(stdoutThread, stderrThread);
             log.warn("Pi run timed out after {}", properties.timeout());
-            return new PiRunResult(PiRunStatus.TIMEOUT, parser.finalText(), stderr.toString().trim());
+            return new PiRunResult(PiRunStatus.TIMEOUT, parser.finalText(), timeoutDiagnostics(stderr));
         }
 
         joinQuietly(stdoutThread, stderrThread);
@@ -192,12 +192,43 @@ public class JsonModePiRunner implements PiRunner {
     }
 
     private PiRunResult toResult(PiJsonlParser parser, int exitCode, StringBuilder stderr) {
-        PiRunStatus status = (exitCode != 0 || parser.failed()) ? PiRunStatus.FAILURE : PiRunStatus.SUCCESS;
-        String diagnostics = stderr.toString().trim();
-        if (diagnostics.isEmpty() && parser.failureReason() != null) {
-            diagnostics = parser.failureReason();
+        String stderrText = stderr.toString().trim();
+        if (exitCode != 0 || parser.failed()) {
+            return new PiRunResult(PiRunStatus.FAILURE, parser.finalText(), failureDiagnostics(stderrText, parser));
         }
-        return new PiRunResult(status, parser.finalText(), diagnostics);
+        if (!parser.hasRecognizedCompletion()) {
+            return new PiRunResult(PiRunStatus.FAILURE, parser.finalText(), incompleteStreamDiagnostics(parser));
+        }
+        if (parser.finalText().isBlank()) {
+            return new PiRunResult(PiRunStatus.FAILURE, parser.finalText(),
+                    "no final text: completion signal received without authoritative text");
+        }
+        return new PiRunResult(PiRunStatus.SUCCESS, parser.finalText(), stderrText);
+    }
+
+    private static String failureDiagnostics(String stderrText, PiJsonlParser parser) {
+        if (!stderrText.isEmpty()) {
+            return stderrText;
+        }
+        return parser.failureReason() != null ? parser.failureReason() : "";
+    }
+
+    private static String incompleteStreamDiagnostics(PiJsonlParser parser) {
+        if (!parser.sawAnyLine()) {
+            return "empty stream: no JSONL output received from Pi";
+        }
+        if (!parser.supportedProtocolObserved()) {
+            if (!parser.sawParsedLine()) {
+                return "malformed stream: no parseable JSONL events received from Pi";
+            }
+            return "unsupported protocol: no recognized Pi JSON-mode event type observed";
+        }
+        return "missing completion: no agent_settled event observed in the run";
+    }
+
+    private static String timeoutDiagnostics(StringBuilder stderr) {
+        String stderrText = stderr.toString().trim();
+        return stderrText.isEmpty() ? "timed out waiting for Pi" : "timed out waiting for Pi: " + stderrText;
     }
 
     private void destroyTree(Process process) {

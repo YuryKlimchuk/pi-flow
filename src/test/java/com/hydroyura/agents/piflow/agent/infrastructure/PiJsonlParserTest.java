@@ -61,4 +61,84 @@ class PiJsonlParserTest {
         assertThat(parser.failed()).isTrue();
         assertThat(parser.failureReason()).isEqualTo("aborted");
     }
+
+    @Test
+    void accept_withUnrecognizedEventTypes_shouldNotObserveSupportedProtocol() {
+        parser.accept("""
+                {"type":"session","version":3,"id":"fake"}
+                """);
+        parser.accept("""
+                {"type":"turn_start"}
+                """);
+        parser.accept("this is not json");
+
+        assertThat(parser.supportedProtocolObserved()).isFalse();
+    }
+
+    @Test
+    void accept_withRecognizedEvent_shouldObserveSupportedProtocol() {
+        parser.accept("""
+                {"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"hi"}}
+                """);
+
+        assertThat(parser.supportedProtocolObserved()).isTrue();
+    }
+
+    @Test
+    void accept_withoutAgentSettled_shouldNotHaveRecognizedCompletion() {
+        parser.accept("""
+                {"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}],"stopReason":"end"}}
+                """);
+
+        assertThat(parser.hasRecognizedCompletion()).isFalse();
+    }
+
+    @Test
+    void accept_withAgentSettled_shouldHaveRecognizedCompletion() {
+        parser.accept("""
+                {"type":"agent_settled","aborted":false}
+                """);
+
+        assertThat(parser.hasRecognizedCompletion()).isTrue();
+    }
+
+    @Test
+    void accept_withSpecificReasonFollowedBySuccessMessage_shouldPreserveSpecificReason() {
+        parser.accept("""
+                {"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"oops"}],"stopReason":"error"}}
+                """);
+        parser.accept("""
+                {"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"fine"}],"stopReason":"end"}}
+                """);
+
+        assertThat(parser.failureReason()).isEqualTo("error");
+        assertThat(parser.failed()).isTrue();
+    }
+
+    @Test
+    void accept_withErrorThenRecoveredSettlement_shouldClearFailed() {
+        parser.accept("""
+                {"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"oops"}],"stopReason":"error"}}
+                """);
+        parser.accept("""
+                {"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"fixed"}],"stopReason":"end"}}
+                """);
+        parser.accept("""
+                {"type":"agent_settled","aborted":false}
+                """);
+
+        assertThat(parser.failed()).isFalse();
+    }
+
+    @Test
+    void accept_withErrorAtFinalSettlement_shouldStayFailed() {
+        parser.accept("""
+                {"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"oops"}],"stopReason":"error"}}
+                """);
+        parser.accept("""
+                {"type":"agent_settled","aborted":false}
+                """);
+
+        assertThat(parser.failed()).isTrue();
+    }
 }
