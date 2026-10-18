@@ -34,6 +34,14 @@ public class AgentStageRunner implements StageRunner {
             and "findings" MUST be a JSON array of strings (it may be empty). Do not emit any other ```json block.
             """;
 
+    private static final String CHANGE_PROPOSAL_INSTRUCTION = """
+            As the final part of your response, emit exactly one JSON code fence using the ```json marker,
+            containing only a single JSON object of the exact shape
+            {"changeId": "<change-directory-name>"}.
+            The "changeId" value MUST be the exact OpenSpec change directory name you created or revised.
+            Do not emit any other ```json block.
+            """;
+
     private final PiRunner piRunner;
 
     public AgentStageRunner(PiRunner piRunner) {
@@ -53,6 +61,13 @@ public class AgentStageRunner implements StageRunner {
                 return StageOutcome.failure(stage, result.diagnostics());
             }
             return extractReviewOutcome(result);
+        }
+
+        if (stage == WorkflowStage.CHANGE_PROPOSAL) {
+            if (result.status() != PiRunStatus.SUCCESS) {
+                return StageOutcome.failure(stage, result.diagnostics());
+            }
+            return extractChangeProposalOutcome(result);
         }
 
         return result.status() == PiRunStatus.SUCCESS
@@ -76,6 +91,7 @@ public class AgentStageRunner implements StageRunner {
             case CHANGE_PROPOSAL -> {
                 StringBuilder sb = new StringBuilder("Prepare OpenSpec change artifacts for the task: " + context.task());
                 context.pendingFeedback().ifPresent(f -> sb.append("\nUser feedback: ").append(f));
+                sb.append('\n').append(CHANGE_PROPOSAL_INSTRUCTION);
                 yield sb.toString();
             }
             case IMPLEMENTATION -> {
@@ -94,6 +110,33 @@ public class AgentStageRunner implements StageRunner {
             }
             default -> context.task();
         };
+    }
+
+    private StageOutcome extractChangeProposalOutcome(PiRunResult result) {
+        String text = result.finalText();
+        List<String> blocks = fencedJsonBlocks(text);
+        if (blocks.size() > 1) {
+            return StageOutcome.failure(WorkflowStage.CHANGE_PROPOSAL,
+                    "multiple ```json blocks: changeId extraction is ambiguous");
+        }
+        String candidate = blocks.size() == 1 ? blocks.get(0) : text.trim();
+
+        JsonNode node;
+        try {
+            node = MAPPER.readTree(candidate);
+        } catch (JacksonException e) {
+            return StageOutcome.failure(WorkflowStage.CHANGE_PROPOSAL, "not valid JSON: " + e.getMessage());
+        }
+        if (node == null || !node.isObject()) {
+            return StageOutcome.failure(WorkflowStage.CHANGE_PROPOSAL, "not a JSON object");
+        }
+
+        JsonNode changeIdNode = node.get("changeId");
+        if (changeIdNode == null || !changeIdNode.isTextual() || changeIdNode.asText().isBlank()) {
+            return StageOutcome.failure(WorkflowStage.CHANGE_PROPOSAL, "missing or invalid changeId");
+        }
+
+        return StageOutcome.changeProposed(WorkflowStage.CHANGE_PROPOSAL, text, changeIdNode.asText());
     }
 
     private StageOutcome extractReviewOutcome(PiRunResult result) {

@@ -82,4 +82,36 @@ class WorkflowTest {
 
         assertThat(workflow.consumePendingFeedback()).isEmpty();
     }
+
+    @Test
+    void changeId_shouldBeAbsentUntilBoundAndImmutableOnceBound() {
+        Workflow workflow = new Workflow(WorkflowId.generate(), "task", "/repo");
+
+        assertThat(workflow.getChangeId()).isEmpty();
+
+        workflow.bindChange("change-a");
+
+        assertThat(workflow.getChangeId()).contains("change-a");
+        assertThatCode(() -> workflow.bindChange("change-a")).doesNotThrowAnyException();
+        assertThat(workflow.getChangeId()).contains("change-a");
+
+        assertThatThrownBy(() -> workflow.bindChange("change-b"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("change-a")
+                .hasMessageContaining("change-b");
+        assertThat(workflow.getChangeId()).contains("change-a");
+    }
+
+    @Test
+    void approvalFingerprint_shouldBeAbsentUntilRecordedAndOverwritable() {
+        Workflow workflow = new Workflow(WorkflowId.generate(), "task", "/repo");
+
+        assertThat(workflow.getApprovalFingerprint()).isEmpty();
+
+        workflow.recordApprovalFingerprint("fingerprint-1");
+        assertThat(workflow.getApprovalFingerprint()).contains("fingerprint-1");
+
+        workflow.recordApprovalFingerprint("fingerprint-2");
+        assertThat(workflow.getApprovalFingerprint()).contains("fingerprint-2");
+    }
 }

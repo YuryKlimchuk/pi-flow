@@ -7,6 +7,7 @@ import com.hydroyura.agents.piflow.workflow.api.WorkflowStatus;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import lombok.AccessLevel;
 import lombok.Getter;
 
@@ -25,6 +26,12 @@ public class Workflow {
 
     @Getter(AccessLevel.NONE)
     private String pendingFeedback = "";
+
+    @Getter(AccessLevel.NONE)
+    private String changeId;
+
+    @Getter(AccessLevel.NONE)
+    private String approvalFingerprint;
 
     public Workflow(WorkflowId id, String task, String targetRepo) {
         this.id = Objects.requireNonNull(id, "id must not be null");
@@ -45,6 +52,38 @@ public class Workflow {
     /** Records user-supplied revision/further-work feedback for the next relevant stage run. */
     public void recordPendingFeedback(String feedback) {
         this.pendingFeedback = Objects.requireNonNull(feedback, "feedback must not be null");
+    }
+
+    /** The bound OpenSpec change identifier, absent until the first successful binding. */
+    public Optional<String> getChangeId() {
+        return Optional.ofNullable(changeId);
+    }
+
+    /**
+     * Binds the workflow permanently to an OpenSpec change identifier.
+     *
+     * <p>The first assignment records the binding; assigning the same value again is a no-op;
+     * assigning a different value throws {@link IllegalStateException}.
+     */
+    public void bindChange(String changeId) {
+        Objects.requireNonNull(changeId, "changeId must not be null");
+        if (this.changeId == null) {
+            this.changeId = changeId;
+        } else if (!this.changeId.equals(changeId)) {
+            throw new IllegalStateException(
+                    "Workflow is already bound to change '" + this.changeId + "' and cannot be rebound to '"
+                            + changeId + "'");
+        }
+    }
+
+    /** The most recently recorded gate/approval fingerprint, absent until the gate first opens. */
+    public Optional<String> getApprovalFingerprint() {
+        return Optional.ofNullable(approvalFingerprint);
+    }
+
+    /** Records (overwrites) the gate/approval fingerprint. */
+    public void recordApprovalFingerprint(String fingerprint) {
+        this.approvalFingerprint = Objects.requireNonNull(fingerprint, "fingerprint must not be null");
     }
 
     /** Returns the pending feedback and clears it in one step; empty string means no feedback. */

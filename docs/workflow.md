@@ -10,10 +10,10 @@ The end-to-end pi-flow workflow, step by step, with the actions of each particip
 
 | Stage | Performed by | Outcome |
 |---|---|---|
-| Task setup | User + orchestrator | Task description and target repository path recorded |
+| Task setup | User + orchestrator | Task description and target repository path recorded after a canonical Git worktree preflight |
 | Project analysis | Analyst | Findings about the project |
-| Change proposal | Architect | Change artifacts in the target repository |
-| Validation & approval | Orchestrator + User | Approved, revisions requested, or rejected/cancelled |
+| Change proposal | Architect | Change artifacts in the target repository, plus a structured change identifier |
+| Validation & approval | Orchestrator + User | Approved, revisions requested, or rejected/cancelled, guarded by an artifact fingerprint |
 | Implementation | Developer | Code changes |
 | Automated verification | Orchestrator | Four-valued verification result (`PASSED` / `FAILED` / `NOT_CONFIGURED` / `INFRASTRUCTURE_ERROR`) |
 | Review | Reviewer (QA) | Structured verdict (`APPROVED` or `CHANGES_REQUIRED`) and findings extracted from the reviewer's JSON output |
@@ -42,15 +42,18 @@ sequenceDiagram
     loop proposal & approval (repeats on revisions, exits on approve or reject)
         O->>P: delegate "change proposal" stage
         P->>T: author / update change artifacts
-        P-->>O: proposal artifacts
-        O->>S: record proposal outcome
-        O->>O: validate change artifacts
-        O->>S: record validation outcome
+        P-->>O: structured result naming the change identifier
+        O->>O: resolve identifier via OpenSpec CLI and bind the workflow
+        O->>O: strict-validate the bound change artifacts
+        O->>S: record proposal, binding, and validation outcome
+        O->>O: capture artifact fingerprint at gate-open
         O->>U: present proposal for review (gate)
         U-->>O: decision (approve / revise / reject)
+        Note over O: on approve, recompute and compare fingerprint before recording approval
     end
 
     alt approved
+        Note over O: before implementation runs, recompute and compare the artifact fingerprint
         loop implementation & review (repeats until accepted)
             O->>P: delegate "implementation" stage
             P->>T: implement change
@@ -111,22 +114,23 @@ Gate commands (`flow-approve`, `flow-reject`, `flow-revise`, `flow-rework`) act 
 ## Participant actions per step
 
 1. **Task setup**
-   - *User*: provides the task description and the path to an existing Git repository.
-   - *Orchestrator*: records the initial workflow state.
+   - *User*: provides the task description and the path to an existing Git repository. No change identifier is supplied at this point.
+   - *Orchestrator*: resolves the path to a canonical Git worktree root via `git rev-parse` before creating any workflow; a non-existent or non-worktree path is rejected. Then records the initial workflow state.
 2. **Project analysis**
    - *Orchestrator*: delegates the stage to the Analyst.
    - *Analyst*: inspects the target repository and returns findings.
    - *Orchestrator*: records the analysis outcome and passes the findings to the next stage.
 3. **Change proposal**
-   - *Orchestrator*: delegates the stage to the Architect.
-   - *Architect*: authors (or, on a later pass, updates) the change artifacts in the target repository.
-   - *Orchestrator*: records the proposal outcome.
+   - *Orchestrator*: delegates the stage to the Architect, requiring a structured result naming the OpenSpec change identifier created or revised.
+   - *Architect*: authors (or, on a later pass, updates) the change artifacts in the target repository and reports the change identifier.
+   - *Orchestrator*: resolves the identifier against the target repository's active OpenSpec changes via the OpenSpec CLI, binds the workflow to it on first success (revisions stay bound to the same identifier), and records the proposal outcome. A missing, ambiguous, path-escaping, or unresolvable identifier fails the stage with no later-stage agent call.
 4. **Validation & approval** — a loop that repeats on revisions:
-   - *Orchestrator*: validates the change artifacts and records the validation outcome.
+   - *Orchestrator*: strict-validates the bound change's artifacts (equivalent to `openspec validate <changeId> --strict`) before presenting the gate, records the validation outcome, and captures an artifact fingerprint over the change's `proposal.md`, `design.md`, `specs/`, and `tasks.md` (with `tasks.md` checkbox markers normalized) at gate-open time.
    - *User*: reviews the proposal and decides:
-     - **approve** → proceed to implementation;
-     - **request revisions** → the Architect revises the proposal, and the loop repeats (validate again, review again);
+     - **approve** → the orchestrator recomputes and compares the fingerprint before recording the approval, then proceeds to implementation; on a mismatch the approval is not recorded, the artifacts are re-validated, and the gate reopens with a fresh fingerprint;
+     - **request revisions** → the Architect revises the same bound change, and the loop repeats (validate again, capture the fingerprint again, review again);
      - **reject / cancel** → the workflow ends and the cancellation is recorded.
+   - *Orchestrator*: immediately before the implementation stage runs, recomputes and compares the fingerprint again; on a mismatch it blocks implementation, re-validates, and reopens the gate. Toggling a `tasks.md` checkbox alone never counts as drift.
 5. **Implementation**
    - *Orchestrator*: delegates the stage to the Developer with the approved artifacts.
    - *Developer*: implements the change in the target repository.

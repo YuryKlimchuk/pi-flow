@@ -225,6 +225,81 @@ class AgentStageRunnerTest {
                 .doesNotContain("User feedback");
     }
 
+    @Test
+    void changeProposal_singleJsonBlockWithChangeId_shouldSucceedAndCarryIdentifier() {
+        StageOutcome outcome = runChangeProposal("""
+                Here is the proposal.
+                ```json
+                {"changeId":"14-bind-workflow"}
+                ```
+                """);
+
+        assertThat(outcome.success()).isTrue();
+        assertThat(outcome.changeId()).contains("14-bind-workflow");
+    }
+
+    @Test
+    void changeProposal_missingChangeId_shouldFailStage() {
+        StageOutcome outcome = runChangeProposal("""
+                ```json
+                {"something":"else"}
+                ```
+                """);
+
+        assertThat(outcome.success()).isFalse();
+        assertThat(outcome.changeId()).isEmpty();
+    }
+
+    @Test
+    void changeProposal_wholeTextJson_shouldSucceed() {
+        StageOutcome outcome = runChangeProposal("{\"changeId\":\"14-bind-workflow\"}");
+
+        assertThat(outcome.success()).isTrue();
+        assertThat(outcome.changeId()).contains("14-bind-workflow");
+    }
+
+    @Test
+    void changeProposal_nonObjectJson_shouldFail() {
+        assertThat(runChangeProposal("```json\n[1,2]\n```").success()).isFalse();
+    }
+
+    @Test
+    void changeProposal_twoJsonBlocks_shouldFailAsAmbiguous() {
+        StageOutcome outcome = runChangeProposal("""
+                ```json
+                {"changeId":"a"}
+                ```
+                ```json
+                {"changeId":"b"}
+                ```
+                """);
+
+        assertThat(outcome.success()).isFalse();
+        assertThat(outcome.changeId()).isEmpty();
+    }
+
+    @Test
+    void changeProposal_failureStatus_shouldReturnFailureWithoutChangeId() {
+        StubPiRunner stub = new StubPiRunner(new PiRunResult(PiRunStatus.FAILURE, "", "boom"));
+        StageRunner runner = new AgentStageRunner(stub);
+
+        StageOutcome outcome = runner.run(WorkflowStage.CHANGE_PROPOSAL, workflow(), emptyContext());
+
+        assertThat(outcome.success()).isFalse();
+        assertThat(outcome.changeId()).isEmpty();
+    }
+
+    @Test
+    void changeProposalPrompt_shouldInstructJsonChangeIdShape() {
+        StubPiRunner stub = new StubPiRunner(new PiRunResult(PiRunStatus.SUCCESS, "{\"changeId\":\"x\"}", ""));
+        StageRunner runner = new AgentStageRunner(stub);
+        runner.run(WorkflowStage.CHANGE_PROPOSAL, workflow(), emptyContext());
+
+        assertThat(stub.lastPrompt())
+                .contains("```json")
+                .contains("\"changeId\"");
+    }
+
     private StageOutcome runReview(String finalText) {
         return runReview(new PiRunResult(PiRunStatus.SUCCESS, finalText, ""));
     }
@@ -233,6 +308,16 @@ class AgentStageRunnerTest {
         StubPiRunner stub = new StubPiRunner(result);
         StageRunner runner = new AgentStageRunner(stub);
         return runner.run(WorkflowStage.REVIEW, workflow(), emptyContext());
+    }
+
+    private StageOutcome runChangeProposal(String finalText) {
+        return runChangeProposal(new PiRunResult(PiRunStatus.SUCCESS, finalText, ""));
+    }
+
+    private StageOutcome runChangeProposal(PiRunResult result) {
+        StubPiRunner stub = new StubPiRunner(result);
+        StageRunner runner = new AgentStageRunner(stub);
+        return runner.run(WorkflowStage.CHANGE_PROPOSAL, workflow(), emptyContext());
     }
 
     private static Workflow workflow() {

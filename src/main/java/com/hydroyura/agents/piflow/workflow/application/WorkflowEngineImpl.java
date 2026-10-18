@@ -8,6 +8,7 @@ import com.hydroyura.agents.piflow.workflow.api.WorkflowStage;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStatus;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowView;
 import com.hydroyura.agents.piflow.workflow.domain.Workflow;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -22,15 +23,28 @@ public class WorkflowEngineImpl implements WorkflowEngine {
     private final WorkflowRepository repository;
     private final StageRunner stageRunner;
     private final Verifier verifier;
+    private final WorktreeCheck worktreeCheck;
+    private final ChangeResolver changeResolver;
+    private final ChangeValidator changeValidator;
+    private final ArtifactFingerprint fingerprint;
 
-    public WorkflowEngineImpl(WorkflowRepository repository, StageRunner stageRunner, Verifier verifier) {
+    public WorkflowEngineImpl(WorkflowRepository repository, StageRunner stageRunner, Verifier verifier,
+                              WorktreeCheck worktreeCheck, ChangeResolver changeResolver,
+                              ChangeValidator changeValidator, ArtifactFingerprint fingerprint) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.stageRunner = Objects.requireNonNull(stageRunner, "stageRunner must not be null");
         this.verifier = Objects.requireNonNull(verifier, "verifier must not be null");
+        this.worktreeCheck = Objects.requireNonNull(worktreeCheck, "worktreeCheck must not be null");
+        this.changeResolver = Objects.requireNonNull(changeResolver, "changeResolver must not be null");
+        this.changeValidator = Objects.requireNonNull(changeValidator, "changeValidator must not be null");
+        this.fingerprint = Objects.requireNonNull(fingerprint, "fingerprint must not be null");
     }
 
     @Override
     public WorkflowView start(String task, String targetRepo) {
+        if (!worktreeCheck.isGitWorktree(Path.of(targetRepo))) {
+            throw new IllegalStateException("Target repository is not a Git worktree: " + targetRepo);
+        }
         Workflow workflow = new Workflow(WorkflowId.generate(), task, targetRepo);
         repository.save(workflow);
         advance(workflow);
@@ -48,9 +62,7 @@ public class WorkflowEngineImpl implements WorkflowEngine {
         switch (workflow.getCurrentStage()) {
             case VALIDATION_APPROVAL -> {
                 workflow.requireAwaitingUserAt(WorkflowStage.VALIDATION_APPROVAL);
-                workflow.moveTo(WorkflowStage.IMPLEMENTATION);
-                workflow.markInProgress();
-                advance(workflow);
+                approveAtValidationGate(workflow);
             }
             case ACCEPTANCE -> {
                 workflow.requireAwaitingUserAt(WorkflowStage.ACCEPTANCE);
@@ -120,7 +132,7 @@ public class WorkflowEngineImpl implements WorkflowEngine {
                     workflow.recordOutcome(StageOutcome.success(stage, ""));
                     workflow.moveTo(WorkflowStage.PROJECT_ANALYSIS);
                 }
-                case PROJECT_ANALYSIS, CHANGE_PROPOSAL, IMPLEMENTATION -> {
+                case PROJECT_ANALYSIS -> {
                     StageContext context = buildStageContext(workflow);
                     StageOutcome outcome;
                     try {
@@ -132,11 +144,13 @@ public class WorkflowEngineImpl implements WorkflowEngine {
                     }
                     workflow.recordOutcome(outcome);
                     if (outcome.success()) {
-                        workflow.moveTo(next(stage));
+                        workflow.moveTo(WorkflowStage.CHANGE_PROPOSAL);
                     } else {
                         workflow.markFailed();
                     }
                 }
+                case CHANGE_PROPOSAL -> handleChangeProposal(workflow);
+                case IMPLEMENTATION -> handleImplementation(workflow);
                 case REVIEW -> {
                     StageContext context = buildStageContext(workflow);
                     StageOutcome outcome;
@@ -162,7 +176,11 @@ public class WorkflowEngineImpl implements WorkflowEngine {
                         workflow.moveTo(WorkflowStage.IMPLEMENTATION);
                     }
                 }
-                case VALIDATION_APPROVAL, ACCEPTANCE -> workflow.markAwaitingUser();
+                case VALIDATION_APPROVAL -> {
+                    recordGateFingerprint(workflow);
+                    workflow.markAwaitingUser();
+                }
+                case ACCEPTANCE -> workflow.markAwaitingUser();
                 case VERIFICATION -> {
                     VerificationResult result;
                     try {
@@ -185,6 +203,147 @@ public class WorkflowEngineImpl implements WorkflowEngine {
         }
     }
 
+    private void handleChangeProposal(Workflow workflow) {
+        WorkflowStage stage = WorkflowStage.CHANGE_PROPOSAL;
+        StageContext context = buildStageContext(workflow);
+        StageOutcome outcome;
+        try {
+            outcome = stageRunner.run(stage, workflow, context);
+        } catch (RuntimeException e) {
+            workflow.recordOutcome(StageOutcome.failure(stage, failureMessage(e)));
+            workflow.markFailed();
+            return;
+        }
+        workflow.recordOutcome(outcome);
+
+        if (!outcome.success()) {
+            workflow.markFailed();
+            return;
+        }
+
+        String candidate = outcome.changeId().orElse(null);
+        if (candidate == null || candidate.isBlank()) {
+            workflow.recordOutcome(StageOutcome.failure(stage,
+                    "CHANGE_PROPOSAL succeeded without a change identifier"));
+            workflow.markFailed();
+            return;
+        }
+
+        ChangeResolution resolution = changeResolver.resolve(workflow.getTargetRepo(), candidate);
+        if (!resolution.isResolved()) {
+            workflow.recordOutcome(StageOutcome.failure(stage, resolutionFailureMessage(candidate, resolution)));
+            workflow.markFailed();
+            return;
+        }
+        String resolvedId = resolution.changeId().orElseThrow();
+
+        if (workflow.getChangeId().isPresent()) {
+            if (!workflow.getChangeId().orElseThrow().equals(resolvedId)) {
+                workflow.recordOutcome(StageOutcome.failure(stage,
+                        "revision named a different change: bound=" + workflow.getChangeId().orElseThrow()
+                                + " proposed=" + resolvedId));
+                workflow.markFailed();
+                return;
+            }
+        } else {
+            workflow.bindChange(resolvedId);
+        }
+
+        ValidationResult validation = changeValidator.validate(workflow.getTargetRepo(), resolvedId);
+        if (!validation.passed()) {
+            workflow.recordOutcome(StageOutcome.failure(stage, "validation failed: " + validation.reason()));
+            workflow.markFailed();
+            return;
+        }
+
+        workflow.moveTo(WorkflowStage.VALIDATION_APPROVAL);
+    }
+
+    private void handleImplementation(Workflow workflow) {
+        if (driftDetected(workflow)) {
+            workflow.recordOutcome(StageOutcome.failure(WorkflowStage.IMPLEMENTATION,
+                    "drift detected before implementation: artifact fingerprint changed since approval"));
+            revalidateAndReopen(workflow);
+            return;
+        }
+
+        WorkflowStage stage = WorkflowStage.IMPLEMENTATION;
+        StageContext context = buildStageContext(workflow);
+        StageOutcome outcome;
+        try {
+            outcome = stageRunner.run(stage, workflow, context);
+        } catch (RuntimeException e) {
+            workflow.recordOutcome(StageOutcome.failure(stage, failureMessage(e)));
+            workflow.markFailed();
+            return;
+        }
+        workflow.recordOutcome(outcome);
+        if (outcome.success()) {
+            workflow.moveTo(WorkflowStage.VERIFICATION);
+        } else {
+            workflow.markFailed();
+        }
+    }
+
+    private void approveAtValidationGate(Workflow workflow) {
+        String current = fingerprint.compute(changeDir(workflow));
+        String recorded = workflow.getApprovalFingerprint().orElseThrow(
+                () -> new IllegalStateException("approval gate fingerprint missing"));
+        if (current.equals(recorded)) {
+            workflow.recordApprovalFingerprint(current);
+            workflow.moveTo(WorkflowStage.IMPLEMENTATION);
+            workflow.markInProgress();
+            advance(workflow);
+        } else {
+            workflow.recordOutcome(StageOutcome.failure(WorkflowStage.VALIDATION_APPROVAL,
+                    "drift detected at approval time: artifact fingerprint changed since the gate opened"));
+            revalidateAndReopen(workflow);
+        }
+    }
+
+    private void revalidateAndReopen(Workflow workflow) {
+        String changeId = workflow.getChangeId().orElseThrow(
+                () -> new IllegalStateException("cannot revalidate without a bound change"));
+        ValidationResult validation = changeValidator.validate(workflow.getTargetRepo(), changeId);
+        if (validation.passed()) {
+            recordGateFingerprint(workflow);
+            workflow.moveTo(WorkflowStage.VALIDATION_APPROVAL);
+            workflow.markAwaitingUser();
+        } else {
+            workflow.recordOutcome(StageOutcome.failure(workflow.getCurrentStage(),
+                    "drift revalidation failed: " + validation.reason()));
+            workflow.moveTo(WorkflowStage.CHANGE_PROPOSAL);
+            workflow.markFailed();
+        }
+    }
+
+    private void recordGateFingerprint(Workflow workflow) {
+        workflow.recordApprovalFingerprint(fingerprint.compute(changeDir(workflow)));
+    }
+
+    private boolean driftDetected(Workflow workflow) {
+        String current = fingerprint.compute(changeDir(workflow));
+        String recorded = workflow.getApprovalFingerprint().orElseThrow(
+                () -> new IllegalStateException("approval fingerprint missing before implementation"));
+        return !current.equals(recorded);
+    }
+
+    private Path changeDir(Workflow workflow) {
+        String changeId = workflow.getChangeId().orElseThrow(
+                () -> new IllegalStateException("workflow has no bound change"));
+        return Path.of(workflow.getTargetRepo(), "openspec", "changes", changeId);
+    }
+
+    private static String resolutionFailureMessage(String candidate, ChangeResolution resolution) {
+        return switch (resolution.status()) {
+            case NOT_FOUND -> "change identifier does not resolve to an active change: " + candidate;
+            case AMBIGUOUS -> "change identifier is ambiguous: " + candidate;
+            case PATH_ESCAPING -> resolution.reason();
+            case CLI_FAILURE -> "OpenSpec CLI resolution failed: " + resolution.reason();
+            case RESOLVED -> throw new IllegalStateException("resolved resolution cannot be a failure");
+        };
+    }
+
     private StageContext buildStageContext(Workflow workflow) {
         String feedback = workflow.consumePendingFeedback();
         return new StageContext(
@@ -204,15 +363,6 @@ public class WorkflowEngineImpl implements WorkflowEngine {
             }
         }
         return Optional.empty();
-    }
-
-    private WorkflowStage next(WorkflowStage stage) {
-        return switch (stage) {
-            case PROJECT_ANALYSIS -> WorkflowStage.CHANGE_PROPOSAL;
-            case CHANGE_PROPOSAL -> WorkflowStage.VALIDATION_APPROVAL;
-            case IMPLEMENTATION -> WorkflowStage.VERIFICATION;
-            default -> throw new IllegalStateException("No next stage after " + stage);
-        };
     }
 
     private static String failureMessage(RuntimeException e) {
