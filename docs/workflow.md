@@ -111,6 +111,23 @@ These states are conceptual only; how they are represented is intentionally not 
 
 Gate commands (`flow-approve`, `flow-reject`, `flow-revise`, `flow-rework`) act only when the workflow is paused at the matching gate stage **and** its status is `AWAITING_USER`. The proposal gates are `VALIDATION_APPROVAL` (approve / reject / request revisions), and the acceptance gate is `ACCEPTANCE` (accept / request further work). `flow-revise` and `flow-rework` accept an optional free-text feedback message (empty when omitted); that feedback is recorded on the workflow, threaded into the next `CHANGE_PROPOSAL` (after a revision request) or `IMPLEMENTATION` (after a further-work request) stage context, and cleared after that stage consumes it. A gate command issued at any other stage, or while the workflow is `IN_PROGRESS` or in a terminal status (`COMPLETED`, `CANCELLED`, `FAILED`), is rejected and leaves the workflow unchanged.
 
+## Pauses, retries, and budgets
+
+The workflow has two non-terminal pause states with distinct meanings:
+
+- **`AWAITING_USER`** — an ordinary gate awaiting a human decision (`VALIDATION_APPROVAL`, `ACCEPTANCE`, or the `NOT_CONFIGURED` verification pause).
+- **`PAUSED`** — the workflow was stopped by a technical failure (process crash, timeout, or malformed/unparseable output) of an eligible stage while that stage's technical-retry budget still has attempts remaining.
+
+The two are never reported interchangeably: a gate never reports `PAUSED`, and a technical-failure pause never reports `AWAITING_USER`. `PAUSED` is not terminal.
+
+**`flow-retry`** is the single, manual retry command. It re-runs a stage whose workflow is `PAUSED` at an eligible stage, and it also resolves the `VERIFICATION`+`NOT_CONFIGURED` pause (re-reading the verification configuration fresh, then resuming normal advancement). There is no separate `flow-retry-verification` command; the one `flow-retry` command serves both cases. A rejected `flow-retry` call (wrong state, terminal workflow, or a write stage without acknowledgement) consumes no budget and leaves the workflow unchanged.
+
+**Write-stage acknowledgement.** `CHANGE_PROPOSAL` (which writes OpenSpec change artifacts) and `IMPLEMENTATION` (which writes target-repository source files) are write stages. Retrying either after a technical failure requires the explicit `--acknowledge-partial-changes` flag on `flow-retry`; without it, the request is rejected and the workflow is unchanged. The orchestrator never re-runs a write stage automatically as a technical-failure retry.
+
+**Technical failure vs content correction.** Every attempt is classified as exactly one of `INITIAL`, `TECHNICAL_RETRY`, or `CONTENT_CORRECTION`. A technical failure (crash, timeout, malformed output) is a `TECHNICAL_RETRY` when re-run; a content correction (a `CHANGES_REQUIRED` review verdict, or a verification command that ran to completion and exited nonzero) loops back to `IMPLEMENTATION` as normal control flow. For verification specifically, a nonzero exit within the timeout is a content correction, while a failure to start the command or a timeout is a technical failure.
+
+**Budgets.** Two configurable budgets bound repetition: a maximum of **3** technical-failure attempts per stage-attempt-sequence (`pi-flow.retry.max-technical-retries`) and a maximum of **5** content-correction loops per workflow (`pi-flow.retry.max-content-corrections`). Exhausting either budget marks the workflow `FAILED`; `FAILED` is terminal and immutable, exactly like `COMPLETED` and `CANCELLED`. Auto-retry is disabled by default, and this change adds no configuration to enable unattended retry — every technical-failure re-run is an explicit `flow-retry` invocation.
+
 ## Participant actions per step
 
 1. **Task setup**
@@ -138,8 +155,9 @@ Gate commands (`flow-approve`, `flow-reject`, `flow-revise`, `flow-rework`) act 
 6. **Automated verification** — a loop that repeats until verification passes:
    - *Orchestrator*: reads the target repository's verification configuration file fresh on every attempt and runs the configured command deterministically, recording a four-valued outcome.
    - *Outcome `PASSED`*: the workflow proceeds to review.
-   - *Outcome `FAILED`*: the configured command ran to completion and reported a problem; the Developer applies corrections and the loop repeats. The workflow does not proceed to review until verification passes.
-   - *Outcome `NOT_CONFIGURED` or `INFRASTRUCTURE_ERROR`*: verification could not run (no configuration file, or the file/command is broken). The workflow pauses in `AWAITING_USER` at the `VERIFICATION` stage — not `FAILED`, not a correction loop — and is recoverable via `flow-retry-verification` once the configuration is fixed, in the same running process.
+   - *Outcome `FAILED`*: the configured command ran to completion and reported a problem (nonzero exit within the timeout); the Developer applies corrections and the loop repeats, bounded by the content-correction budget. The workflow does not proceed to review until verification passes.
+   - *Outcome `NOT_CONFIGURED`*: no configuration file exists. The workflow pauses in `AWAITING_USER` at the `VERIFICATION` stage — not `PAUSED`, not `FAILED`, not a correction loop — and is recoverable via `flow-retry` once the file is created, in the same running process, with no technical-retry budget consumed.
+   - *Outcome `INFRASTRUCTURE_ERROR`*: the configuration file exists but is invalid, the command cannot be started, or the command times out. This is a technical failure of the verification stage: the workflow pauses in `PAUSED` (not `AWAITING_USER`) under the technical-retry budget, and `flow-retry` re-runs it.
 
    **Verification configuration.** The command to run is read from a per-target-repository JSON file (default `.pi-flow/verify.json`, path overridable via `pi-flow.verification.config-path`), re-read fresh on every attempt so a user can create or fix it without restarting the application. The fixed schema is a JSON object with `command` (non-empty array of strings), `timeoutSeconds` (positive integer), and optional `workingDirectory` (defaults to the target repository root). The verifier never invokes any command other than the one in this user-authored file.
 7. **Review** — a loop that repeats on corrections:
@@ -161,4 +179,4 @@ Gate commands (`flow-approve`, `flow-reject`, `flow-revise`, `flow-rework`) act 
 ## Open questions
 
 - **Persistence technology** — the concrete storage behind "Workflow state storage" (embedded database vs file) is unresolved.
-- **Retry / correction limits** — the loops above are conceptual; the number of revision/correction rounds is not decided.
+- **Retry / correction limits** — resolved: retries and correction loops are bounded by the configurable technical-retry and content-correction budgets described above (defaults 3 and 5).

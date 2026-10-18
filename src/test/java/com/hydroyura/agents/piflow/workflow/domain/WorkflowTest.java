@@ -114,4 +114,39 @@ class WorkflowTest {
         workflow.recordApprovalFingerprint("fingerprint-2");
         assertThat(workflow.getApprovalFingerprint()).contains("fingerprint-2");
     }
+
+    @Test
+    void markPaused_shouldSetPausedStatus_andPausedIsNotTerminal() {
+        Workflow workflow = new Workflow(WorkflowId.generate(), "task", "/repo");
+
+        workflow.markPaused();
+
+        assertThat(workflow.getStatus()).isEqualTo(WorkflowStatus.PAUSED);
+        assertThat(workflow.isTerminal()).isFalse();
+    }
+
+    @Test
+    void pausedAndAwaitingUser_shouldBeDistinctValues() {
+        assertThat(WorkflowStatus.PAUSED).isNotEqualTo(WorkflowStatus.AWAITING_USER);
+    }
+
+    @Test
+    void retryCounters_shouldIncrementAndTechnicalRetryResetsOnMoveTo() {
+        Workflow workflow = new Workflow(WorkflowId.generate(), "task", "/repo");
+
+        assertThat(workflow.technicalRetryCount()).isZero();
+        assertThat(workflow.contentCorrectionCount()).isZero();
+
+        workflow.incrementTechnicalRetryCount();
+        workflow.incrementTechnicalRetryCount();
+        workflow.incrementContentCorrectionCount();
+
+        assertThat(workflow.technicalRetryCount()).isEqualTo(2);
+        assertThat(workflow.contentCorrectionCount()).isEqualTo(1);
+
+        workflow.moveTo(WorkflowStage.CHANGE_PROPOSAL);
+
+        assertThat(workflow.technicalRetryCount()).isZero();
+        assertThat(workflow.contentCorrectionCount()).isEqualTo(1);
+    }
 }

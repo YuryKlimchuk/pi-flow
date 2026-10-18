@@ -15,5 +15,5 @@ public interface WorkflowEngine {
 
     WorkflowView requestFurtherWork(WorkflowId id, String feedback);
 
-    WorkflowView retryVerification(WorkflowId id);
+    WorkflowView retryStage(WorkflowId id, boolean acknowledgePartialChanges);
 }

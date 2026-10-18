@@ -15,3 +15,6 @@ pi-flow:
       architect: medium
       developer: expensive
       reviewer: medium
+#  retry:
+#    max-technical-retries: 3
+#    max-content-corrections: 5

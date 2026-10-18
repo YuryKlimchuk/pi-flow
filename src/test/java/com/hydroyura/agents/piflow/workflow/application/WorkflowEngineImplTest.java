@@ -3,8 +3,10 @@ package com.hydroyura.agents.piflow.workflow.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.hydroyura.agents.piflow.workflow.api.AttemptKind;
 import com.hydroyura.agents.piflow.workflow.api.ReviewVerdict;
 import com.hydroyura.agents.piflow.workflow.api.StageOutcome;
+import com.hydroyura.agents.piflow.workflow.api.WorkflowEngine;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowId;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStage;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStatus;
@@ -44,6 +46,7 @@ class WorkflowEngineImplTest {
     private final ArtifactFingerprint fingerprint = new ChangeArtifactFingerprint();
     private final StageRunner alwaysPass = passWithProposal();
     private final Verifier alwaysVerify = workflow -> VerificationResult.passed("verification passed", false);
+    private final RetryProperties retryProperties = new RetryProperties(null, null);
 
     @BeforeEach
     void setUp() throws Exception {
@@ -80,12 +83,19 @@ class WorkflowEngineImplTest {
     }
 
     private WorkflowEngineImpl engine(StageRunner runner, Verifier verifier) {
-        return new WorkflowEngineImpl(repository, runner, verifier, worktreeCheck, resolverOk, validatorOk, fingerprint);
+        return new WorkflowEngineImpl(repository, runner, verifier, worktreeCheck, resolverOk, validatorOk, fingerprint,
+                retryProperties);
     }
 
     private WorkflowEngineImpl engine(StageRunner runner, Verifier verifier,
                                       ChangeResolver resolver, ChangeValidator validator) {
-        return new WorkflowEngineImpl(repository, runner, verifier, worktreeCheck, resolver, validator, fingerprint);
+        return new WorkflowEngineImpl(repository, runner, verifier, worktreeCheck, resolver, validator, fingerprint,
+                retryProperties);
+    }
+
+    private WorkflowEngineImpl engine(StageRunner runner, Verifier verifier, RetryProperties retryProperties) {
+        return new WorkflowEngineImpl(repository, runner, verifier, worktreeCheck, resolverOk, validatorOk, fingerprint,
+                retryProperties);
     }
 
     private Workflow loaded(WorkflowId id) {
@@ -247,10 +257,11 @@ class WorkflowEngineImplTest {
         view = engine.approve(view.id());
 
         assertThat(view.currentStage()).isEqualTo(WorkflowStage.VERIFICATION);
-        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.PAUSED);
         StageOutcome last = view.outcomes().getLast();
         assertThat(last.verificationStatus()).contains(VerificationStatus.INFRASTRUCTURE_ERROR);
         assertThat(last.output()).contains("missing executable");
+        assertThat(last.attemptKind()).isEqualTo(AttemptKind.INITIAL);
     }
 
     @Test
@@ -276,14 +287,14 @@ class WorkflowEngineImplTest {
         view = engine.approve(view.id());
 
         assertThat(view.currentStage()).isEqualTo(WorkflowStage.VERIFICATION);
-        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.PAUSED);
         StageOutcome last = view.outcomes().getLast();
         assertThat(last.verificationStatus()).contains(VerificationStatus.INFRASTRUCTURE_ERROR);
         assertThat(last.output()).contains("missing executable");
     }
 
     @Test
-    void retryVerification_afterNotConfigured_shouldReEvaluateAndRoute() {
+    void retryStage_afterVerificationNotConfigured_shouldReloadConfigAndReEvaluate() {
         AtomicInteger verifyCalls = new AtomicInteger();
         Verifier stub = workflow -> verifyCalls.getAndIncrement() == 0
                 ? VerificationResult.notConfigured("no config file")
@@ -295,7 +306,7 @@ class WorkflowEngineImplTest {
         assertThat(view.currentStage()).isEqualTo(WorkflowStage.VERIFICATION);
         assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
 
-        view = engine.retryVerification(view.id());
+        view = engine.retryStage(view.id(), false);
 
         assertThat(view.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
         assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
@@ -304,7 +315,7 @@ class WorkflowEngineImplTest {
     }
 
     @Test
-    void retryVerification_afterInfrastructureError_shouldReEvaluateAndRoute() {
+    void retryStage_afterInfrastructureError_shouldReEvaluateAndRoute() {
         AtomicInteger verifyCalls = new AtomicInteger();
         Verifier stub = workflow -> verifyCalls.getAndIncrement() == 0
                 ? VerificationResult.infrastructureError("broken config")
@@ -314,16 +325,16 @@ class WorkflowEngineImplTest {
         view = engine.approve(view.id());
 
         assertThat(view.currentStage()).isEqualTo(WorkflowStage.VERIFICATION);
-        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.PAUSED);
 
-        view = engine.retryVerification(view.id());
+        view = engine.retryStage(view.id(), false);
 
         assertThat(view.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
         assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
     }
 
     @Test
-    void retryVerification_whenNotAtVerificationGate_shouldBeRejected() {
+    void retryStage_whenNotAtRetryableState_shouldBeRejected() {
         Workflow workflow = new Workflow(WorkflowId.generate(), "task", "/repo");
         workflow.moveTo(WorkflowStage.VALIDATION_APPROVAL);
         workflow.markAwaitingUser();
@@ -331,7 +342,7 @@ class WorkflowEngineImplTest {
 
         WorkflowEngineImpl engine = engine(alwaysPass, alwaysVerify);
 
-        assertThatThrownBy(() -> engine.retryVerification(workflow.getId()))
+        assertThatThrownBy(() -> engine.retryStage(workflow.getId(), false))
                 .isInstanceOf(IllegalStateException.class);
 
         WorkflowView after = engine.status(workflow.getId());
@@ -340,7 +351,7 @@ class WorkflowEngineImplTest {
     }
 
     @Test
-    void retryVerification_endToEnd_withRealCommandVerifier() throws IOException {
+    void retryStage_endToEnd_withRealCommandVerifier() throws IOException {
         WorkflowEngineImpl engine = engine(alwaysPass, new CommandVerifier(new VerificationProperties(null)));
         WorkflowView view = engine.start("task", targetRepo.toString());
         view = engine.approve(view.id());
@@ -352,7 +363,7 @@ class WorkflowEngineImplTest {
         Files.writeString(configDir.resolve("verify.json"),
                 "{\"command\":[\"sh\",\"-c\",\"exit 0\"],\"timeoutSeconds\":10}");
 
-        view = engine.retryVerification(view.id());
+        view = engine.retryStage(view.id(), false);
 
         assertThat(view.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
         assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
@@ -449,7 +460,7 @@ class WorkflowEngineImplTest {
     }
 
     @Test
-    void stageRunnerException_shouldRecordFailureAndMarkFailed() {
+    void stageRunnerException_shouldRecordFailureAndPause() {
         StageRunner throwing = (stage, workflow, context) -> {
             if (stage == WorkflowStage.IMPLEMENTATION) {
                 throw new RuntimeException("boom");
@@ -464,7 +475,8 @@ class WorkflowEngineImplTest {
 
         view = engine.approve(view.id());
 
-        assertThat(view.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.PAUSED);
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.IMPLEMENTATION);
         assertThat(view.outcomes()).anySatisfy(outcome -> {
             assertThat(outcome.stage()).isEqualTo(WorkflowStage.IMPLEMENTATION);
             assertThat(outcome.success()).isFalse();
@@ -473,7 +485,7 @@ class WorkflowEngineImplTest {
     }
 
     @Test
-    void verifierException_shouldRecordFailureAndMarkFailed() {
+    void verifierException_shouldRecordFailureAndPause() {
         Verifier throwing = workflow -> {
             throw new RuntimeException("verify boom");
         };
@@ -482,7 +494,8 @@ class WorkflowEngineImplTest {
 
         view = engine.approve(view.id());
 
-        assertThat(view.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.PAUSED);
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.VERIFICATION);
         assertThat(view.outcomes()).anySatisfy(outcome -> {
             assertThat(outcome.stage()).isEqualTo(WorkflowStage.VERIFICATION);
             assertThat(outcome.success()).isFalse();
@@ -668,7 +681,7 @@ class WorkflowEngineImplTest {
     }
 
     @Test
-    void review_technicalFailure_shouldMarkFailed_notLoop() {
+    void review_technicalFailure_shouldPause_notLoop() {
         StageRunner runner = (stage, workflow, context) ->
                 stage == WorkflowStage.REVIEW
                         ? StageOutcome.failure(stage, "reviewer crashed")
@@ -680,11 +693,12 @@ class WorkflowEngineImplTest {
 
         view = engine.approve(view.id());
 
-        assertThat(view.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.PAUSED);
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.REVIEW);
     }
 
     @Test
-    void review_malformedVerdict_shouldMarkFailed() {
+    void review_malformedVerdict_shouldPauseAsTechnicalFailure() {
         StageRunner runner = (stage, workflow, context) ->
                 stage == WorkflowStage.REVIEW
                         ? StageOutcome.success(stage, "ok")
@@ -696,8 +710,8 @@ class WorkflowEngineImplTest {
 
         view = engine.approve(view.id());
 
-        assertThat(view.status()).isEqualTo(WorkflowStatus.FAILED);
-        assertThat(view.currentStage()).isNotEqualTo(WorkflowStage.ACCEPTANCE);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.PAUSED);
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.REVIEW);
     }
 
     // --- 4. Binding and validation after CHANGE_PROPOSAL ---
@@ -977,6 +991,485 @@ class WorkflowEngineImplTest {
         view = engine.approve(view.id());
         assertThat(Files.readString(tracked)).isEqualTo("modified-uncommitted");
         assertThat(gitStatusPorcelain(repo)).isEqualTo(statusBefore);
+    }
+
+    // --- 7. Retry, budgets, and history (change 15) ---
+
+    @Test
+    void verification_nonzeroExitWithinTimeout_isContentCorrection() {
+        AtomicInteger verifyCalls = new AtomicInteger();
+        Verifier stub = workflow -> verifyCalls.getAndIncrement() == 0
+                ? VerificationResult.failed("exit code 1", false)
+                : VerificationResult.passed("passed", false);
+        WorkflowEngineImpl engine = engine(alwaysPass, stub);
+        WorkflowView view = engine.start("task", targetRepo.toString());
+        view = engine.approve(view.id());
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+        assertThat(view.outcomes()).anySatisfy(o -> {
+            assertThat(o.stage()).isEqualTo(WorkflowStage.VERIFICATION);
+            assertThat(o.verificationStatus()).contains(VerificationStatus.FAILED);
+            assertThat(o.attemptKind()).isEqualTo(AttemptKind.CONTENT_CORRECTION);
+        });
+    }
+
+    @Test
+    void verification_processStartOrTimeoutFailure_isTechnicalFailure() {
+        WorkflowEngineImpl engine = engine(alwaysPass,
+                workflow -> VerificationResult.infrastructureError("command timed out"));
+        WorkflowView view = engine.start("task", targetRepo.toString());
+        view = engine.approve(view.id());
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.VERIFICATION);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.PAUSED);
+        StageOutcome last = view.outcomes().getLast();
+        assertThat(last.verificationStatus()).contains(VerificationStatus.INFRASTRUCTURE_ERROR);
+        assertThat(last.attemptKind()).isEqualTo(AttemptKind.INITIAL);
+    }
+
+    @Test
+    void verification_notConfigured_stillPausesAtAwaitingUser() {
+        WorkflowEngineImpl engine = engine(alwaysPass,
+                workflow -> VerificationResult.notConfigured("no config"));
+        WorkflowView view = engine.start("task", targetRepo.toString());
+        view = engine.approve(view.id());
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.VERIFICATION);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+        StageOutcome last = view.outcomes().getLast();
+        assertThat(last.verificationStatus()).contains(VerificationStatus.NOT_CONFIGURED);
+        assertThat(last.attemptKind()).isEqualTo(AttemptKind.INITIAL);
+    }
+
+    @Test
+    void verification_infrastructureError_withBudgetRemaining_pausesAtPausedNotAwaitingUser() {
+        WorkflowEngineImpl engine = engine(alwaysPass,
+                workflow -> VerificationResult.infrastructureError("missing executable"));
+        WorkflowView view = engine.start("task", targetRepo.toString());
+        view = engine.approve(view.id());
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.VERIFICATION);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.PAUSED);
+        assertThat(view.status()).isNotEqualTo(WorkflowStatus.AWAITING_USER);
+    }
+
+    @Test
+    void verification_infrastructureError_exhaustingBudget_marksFailed() {
+        WorkflowEngineImpl engine = engine(alwaysPass,
+                workflow -> VerificationResult.infrastructureError("missing executable"),
+                new RetryProperties(1, 5));
+        WorkflowView view = engine.start("task", targetRepo.toString());
+        view = engine.approve(view.id());
+
+        assertThat(view.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.VERIFICATION);
+    }
+
+    @Test
+    void technicalFailure_withBudgetRemaining_pausesInsteadOfFailing() {
+        StageRunner runner = (stage, workflow, context) -> {
+            if (stage == WorkflowStage.PROJECT_ANALYSIS) {
+                return StageOutcome.failure(stage, "analysis crashed");
+            }
+            return stage == WorkflowStage.CHANGE_PROPOSAL
+                    ? StageOutcome.changeProposed(stage, "ok", CHANGE_ID)
+                    : StageOutcome.success(stage, "ok");
+        };
+        WorkflowEngineImpl engine = engine(runner, alwaysVerify);
+        WorkflowView view = engine.start("task", targetRepo.toString());
+
+        assertThat(view.status()).isEqualTo(WorkflowStatus.PAUSED);
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.PROJECT_ANALYSIS);
+    }
+
+    @Test
+    void technicalFailure_exhaustingBudget_marksFailed() {
+        StageRunner runner = (stage, workflow, context) ->
+                stage == WorkflowStage.REVIEW
+                        ? StageOutcome.failure(stage, "reviewer crashed")
+                        : stage == WorkflowStage.CHANGE_PROPOSAL
+                                ? StageOutcome.changeProposed(stage, "ok", CHANGE_ID)
+                                : StageOutcome.success(stage, "ok");
+        WorkflowEngineImpl engine = engine(runner, alwaysVerify, new RetryProperties(1, 5));
+        WorkflowView view = engine.start("task", targetRepo.toString());
+        view = engine.approve(view.id());
+
+        assertThat(view.status()).isEqualTo(WorkflowStatus.FAILED);
+    }
+
+    @Test
+    void retryStage_forTechnicallyFailedReview_shouldReRunAndSucceed() {
+        AtomicInteger reviewCalls = new AtomicInteger();
+        StageRunner runner = (stage, workflow, context) -> {
+            if (stage == WorkflowStage.REVIEW) {
+                return reviewCalls.getAndIncrement() == 0
+                        ? StageOutcome.failure(stage, "reviewer crashed")
+                        : StageOutcome.reviewed(stage, "ok", ReviewVerdict.APPROVED, List.of());
+            }
+            return stage == WorkflowStage.CHANGE_PROPOSAL
+                    ? StageOutcome.changeProposed(stage, "ok", CHANGE_ID)
+                    : StageOutcome.success(stage, "ok");
+        };
+        WorkflowEngineImpl engine = engine(runner, alwaysVerify);
+        WorkflowView view = engine.start("task", targetRepo.toString());
+        view = engine.approve(view.id());
+
+        assertThat(view.status()).isEqualTo(WorkflowStatus.PAUSED);
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.REVIEW);
+
+        view = engine.retryStage(view.id(), false);
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+    }
+
+    @Test
+    void retryStage_forImplementationWithoutAcknowledgement_shouldBeRejected() {
+        StageRunner runner = (stage, workflow, context) -> {
+            if (stage == WorkflowStage.IMPLEMENTATION) {
+                throw new RuntimeException("boom");
+            }
+            return stage == WorkflowStage.CHANGE_PROPOSAL
+                    ? StageOutcome.changeProposed(stage, "ok", CHANGE_ID)
+                    : StageOutcome.success(stage, "ok");
+        };
+        WorkflowEngineImpl engine = engine(runner, alwaysVerify);
+        WorkflowView view = engine.start("task", targetRepo.toString());
+        view = engine.approve(view.id());
+
+        assertThat(view.status()).isEqualTo(WorkflowStatus.PAUSED);
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.IMPLEMENTATION);
+        WorkflowId id = view.id();
+        int technicalBefore = loaded(id).technicalRetryCount();
+
+        assertThatThrownBy(() -> engine.retryStage(id, false))
+                .isInstanceOf(IllegalStateException.class);
+
+        WorkflowView after = engine.status(id);
+        assertThat(after.currentStage()).isEqualTo(WorkflowStage.IMPLEMENTATION);
+        assertThat(after.status()).isEqualTo(WorkflowStatus.PAUSED);
+        assertThat(loaded(id).technicalRetryCount()).isEqualTo(technicalBefore);
+    }
+
+    @Test
+    void retryStage_forImplementationWithAcknowledgement_shouldReRun() {
+        AtomicInteger implementationCalls = new AtomicInteger();
+        StageRunner runner = (stage, workflow, context) -> {
+            if (stage == WorkflowStage.IMPLEMENTATION) {
+                return implementationCalls.getAndIncrement() == 0
+                        ? StageOutcome.failure(stage, "impl crashed")
+                        : StageOutcome.success(stage, "ok");
+            }
+            return stage == WorkflowStage.CHANGE_PROPOSAL
+                    ? StageOutcome.changeProposed(stage, "ok", CHANGE_ID)
+                    : stage == WorkflowStage.REVIEW
+                            ? StageOutcome.reviewed(stage, "ok", ReviewVerdict.APPROVED, List.of())
+                            : StageOutcome.success(stage, "ok");
+        };
+        WorkflowEngineImpl engine = engine(runner, alwaysVerify);
+        WorkflowView view = engine.start("task", targetRepo.toString());
+        view = engine.approve(view.id());
+
+        assertThat(view.status()).isEqualTo(WorkflowStatus.PAUSED);
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.IMPLEMENTATION);
+
+        view = engine.retryStage(view.id(), true);
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+    }
+
+    @Test
+    void retryStage_forChangeProposalWithoutAcknowledgement_shouldBeRejected() {
+        StageRunner runner = (stage, workflow, context) -> {
+            if (stage == WorkflowStage.CHANGE_PROPOSAL) {
+                throw new RuntimeException("proposal boom");
+            }
+            return StageOutcome.success(stage, "ok");
+        };
+        WorkflowEngineImpl engine = engine(runner, alwaysVerify);
+        WorkflowView view = engine.start("task", targetRepo.toString());
+
+        assertThat(view.status()).isEqualTo(WorkflowStatus.PAUSED);
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.CHANGE_PROPOSAL);
+
+        assertThatThrownBy(() -> engine.retryStage(view.id(), false))
+                .isInstanceOf(IllegalStateException.class);
+
+        WorkflowView after = engine.status(view.id());
+        assertThat(after.status()).isEqualTo(WorkflowStatus.PAUSED);
+        assertThat(after.currentStage()).isEqualTo(WorkflowStage.CHANGE_PROPOSAL);
+    }
+
+    @Test
+    void retryStage_forChangeProposalWithAcknowledgement_shouldReRun() {
+        AtomicInteger proposalCalls = new AtomicInteger();
+        StageRunner runner = (stage, workflow, context) -> {
+            if (stage == WorkflowStage.CHANGE_PROPOSAL) {
+                return proposalCalls.getAndIncrement() == 0
+                        ? StageOutcome.failure(stage, "proposal crashed")
+                        : StageOutcome.changeProposed(stage, "ok", CHANGE_ID);
+            }
+            return StageOutcome.success(stage, "ok");
+        };
+        WorkflowEngineImpl engine = engine(runner, alwaysVerify);
+        WorkflowView view = engine.start("task", targetRepo.toString());
+
+        assertThat(view.status()).isEqualTo(WorkflowStatus.PAUSED);
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.CHANGE_PROPOSAL);
+
+        view = engine.retryStage(view.id(), true);
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.VALIDATION_APPROVAL);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+    }
+
+    @Test
+    void retryStage_onTerminalWorkflow_shouldBeRejected() {
+        WorkflowEngineImpl completedEngine = engine(alwaysPass, alwaysVerify);
+        WorkflowView started = completedEngine.start("task", targetRepo.toString());
+        WorkflowView completed = completedEngine.approve(completedEngine.approve(started.id()).id());
+        assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThatThrownBy(() -> completedEngine.retryStage(completed.id(), true))
+                .isInstanceOf(IllegalStateException.class);
+
+        WorkflowEngineImpl cancelledEngine = engine(alwaysPass, alwaysVerify);
+        WorkflowView started2 = cancelledEngine.start("task", targetRepo.toString());
+        WorkflowView cancelled = cancelledEngine.reject(started2.id());
+        assertThat(cancelled.status()).isEqualTo(WorkflowStatus.CANCELLED);
+        assertThatThrownBy(() -> cancelledEngine.retryStage(cancelled.id(), false))
+                .isInstanceOf(IllegalStateException.class);
+
+        StageRunner failingReview = (stage, workflow, context) ->
+                stage == WorkflowStage.REVIEW
+                        ? StageOutcome.failure(stage, "reviewer crashed")
+                        : stage == WorkflowStage.CHANGE_PROPOSAL
+                                ? StageOutcome.changeProposed(stage, "ok", CHANGE_ID)
+                                : StageOutcome.success(stage, "ok");
+        WorkflowEngineImpl failedEngine = engine(failingReview, alwaysVerify, new RetryProperties(1, 5));
+        WorkflowView started3 = failedEngine.start("task", targetRepo.toString());
+        WorkflowView failed = failedEngine.approve(started3.id());
+        assertThat(failed.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThatThrownBy(() -> failedEngine.retryStage(failed.id(), true))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void retryStage_onNonPausedNonAwaitingWorkflow_shouldBeRejected() {
+        Workflow workflow = new Workflow(WorkflowId.generate(), "task", "/repo");
+        workflow.moveTo(WorkflowStage.PROJECT_ANALYSIS);
+        workflow.markInProgress();
+        repository.save(workflow);
+
+        WorkflowEngineImpl engine = engine(alwaysPass, alwaysVerify);
+
+        assertThatThrownBy(() -> engine.retryStage(workflow.getId(), false))
+                .isInstanceOf(IllegalStateException.class);
+
+        WorkflowView after = engine.status(workflow.getId());
+        assertThat(after.currentStage()).isEqualTo(WorkflowStage.PROJECT_ANALYSIS);
+        assertThat(after.status()).isEqualTo(WorkflowStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void retryStage_rejectedCall_shouldNotConsumeBudget() {
+        StageRunner runner = (stage, workflow, context) -> {
+            if (stage == WorkflowStage.IMPLEMENTATION) {
+                throw new RuntimeException("boom");
+            }
+            return stage == WorkflowStage.CHANGE_PROPOSAL
+                    ? StageOutcome.changeProposed(stage, "ok", CHANGE_ID)
+                    : StageOutcome.success(stage, "ok");
+        };
+        WorkflowEngineImpl engine = engine(runner, alwaysVerify);
+        WorkflowView view = engine.start("task", targetRepo.toString());
+        view = engine.approve(view.id());
+        assertThat(view.status()).isEqualTo(WorkflowStatus.PAUSED);
+
+        WorkflowId id = view.id();
+        int technicalBefore = loaded(id).technicalRetryCount();
+        int contentBefore = loaded(id).contentCorrectionCount();
+
+        assertThatThrownBy(() -> engine.retryStage(id, false))
+                .isInstanceOf(IllegalStateException.class);
+
+        assertThat(loaded(id).technicalRetryCount()).isEqualTo(technicalBefore);
+        assertThat(loaded(id).contentCorrectionCount()).isEqualTo(contentBefore);
+    }
+
+    @Test
+    void retryStage_exhaustingTechnicalBudget_shouldMarkFailed() {
+        StageRunner failingReview = (stage, workflow, context) ->
+                stage == WorkflowStage.REVIEW
+                        ? StageOutcome.failure(stage, "reviewer crashed")
+                        : stage == WorkflowStage.CHANGE_PROPOSAL
+                                ? StageOutcome.changeProposed(stage, "ok", CHANGE_ID)
+                                : StageOutcome.success(stage, "ok");
+        WorkflowEngineImpl engine = engine(failingReview, alwaysVerify, new RetryProperties(2, 5));
+        WorkflowView view = engine.start("task", targetRepo.toString());
+        view = engine.approve(view.id());
+
+        assertThat(view.status()).isEqualTo(WorkflowStatus.PAUSED);
+
+        view = engine.retryStage(view.id(), false);
+
+        assertThat(view.status()).isEqualTo(WorkflowStatus.FAILED);
+
+        WorkflowId failedId = view.id();
+        assertThatThrownBy(() -> engine.retryStage(failedId, false))
+                .isInstanceOf(IllegalStateException.class);
+
+        assertThat(engine.status(failedId).status()).isEqualTo(WorkflowStatus.FAILED);
+    }
+
+    @Test
+    void contentCorrectionLoop_withinBudget_shouldContinueLooping() {
+        AtomicInteger reviewCalls = new AtomicInteger();
+        StageRunner runner = (stage, workflow, context) -> {
+            if (stage == WorkflowStage.REVIEW) {
+                return reviewCalls.getAndIncrement() == 0
+                        ? StageOutcome.reviewed(stage, "needs corrections", ReviewVerdict.CHANGES_REQUIRED, List.of("fix"))
+                        : StageOutcome.reviewed(stage, "ok", ReviewVerdict.APPROVED, List.of());
+            }
+            return stage == WorkflowStage.CHANGE_PROPOSAL
+                    ? StageOutcome.changeProposed(stage, "ok", CHANGE_ID)
+                    : StageOutcome.success(stage, "ok");
+        };
+        WorkflowEngineImpl engine = engine(runner, alwaysVerify);
+        WorkflowView view = engine.start("task", targetRepo.toString());
+        view = engine.approve(view.id());
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+        assertThat(view.outcomes()).anySatisfy(o -> {
+            assertThat(o.stage()).isEqualTo(WorkflowStage.REVIEW);
+            assertThat(o.verdict()).contains(ReviewVerdict.CHANGES_REQUIRED);
+            assertThat(o.attemptKind()).isEqualTo(AttemptKind.CONTENT_CORRECTION);
+        });
+    }
+
+    @Test
+    void contentCorrectionLoop_exhaustingBudget_shouldMarkFailed() {
+        StageRunner alwaysChangesRequired = (stage, workflow, context) ->
+                stage == WorkflowStage.REVIEW
+                        ? StageOutcome.reviewed(stage, "needs corrections", ReviewVerdict.CHANGES_REQUIRED, List.of("fix"))
+                        : stage == WorkflowStage.CHANGE_PROPOSAL
+                                ? StageOutcome.changeProposed(stage, "ok", CHANGE_ID)
+                                : StageOutcome.success(stage, "ok");
+        WorkflowEngineImpl engine = engine(alwaysChangesRequired, alwaysVerify, new RetryProperties(3, 1));
+        WorkflowView view = engine.start("task", targetRepo.toString());
+        view = engine.approve(view.id());
+
+        assertThat(view.status()).isEqualTo(WorkflowStatus.FAILED);
+    }
+
+    @Test
+    void retryStage_isTheSoleRetryEntryPoint_onWorkflowEngine() {
+        assertThat(WorkflowEngine.class.getDeclaredMethods())
+                .anyMatch(method -> method.getName().equals("retryStage"));
+        assertThat(WorkflowEngine.class.getDeclaredMethods())
+                .noneMatch(method -> method.getName().equals("retryVerification"));
+    }
+
+    @Test
+    void outcomes_afterMultipleRetries_shouldPreserveFullHistoryWithKinds() {
+        AtomicInteger reviewCalls = new AtomicInteger();
+        StageRunner runner = (stage, workflow, context) -> {
+            if (stage == WorkflowStage.REVIEW) {
+                return reviewCalls.getAndIncrement() == 0
+                        ? StageOutcome.failure(stage, "reviewer crashed")
+                        : StageOutcome.reviewed(stage, "ok", ReviewVerdict.APPROVED, List.of());
+            }
+            return stage == WorkflowStage.CHANGE_PROPOSAL
+                    ? StageOutcome.changeProposed(stage, "ok", CHANGE_ID)
+                    : StageOutcome.success(stage, "ok");
+        };
+        AtomicInteger verifyCalls = new AtomicInteger();
+        Verifier verifier = workflow -> {
+            int call = verifyCalls.getAndIncrement();
+            return call == 1
+                    ? VerificationResult.failed("verification failed", false)
+                    : VerificationResult.passed("passed", false);
+        };
+        WorkflowEngineImpl engine = engine(runner, verifier);
+        WorkflowView view = engine.start("task", targetRepo.toString());
+        view = engine.approve(view.id());
+
+        assertThat(view.status()).isEqualTo(WorkflowStatus.PAUSED);
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.REVIEW);
+
+        view = engine.retryStage(view.id(), false);
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
+
+        view = engine.requestFurtherWork(view.id(), "further");
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
+
+        List<StageOutcome> reviews = view.outcomes().stream()
+                .filter(o -> o.stage() == WorkflowStage.REVIEW)
+                .toList();
+        assertThat(reviews).hasSize(3);
+        assertThat(reviews.get(0).attemptKind()).isEqualTo(AttemptKind.INITIAL);
+        assertThat(reviews.get(0).success()).isFalse();
+        assertThat(reviews.get(1).attemptKind()).isEqualTo(AttemptKind.TECHNICAL_RETRY);
+        assertThat(reviews.get(1).success()).isTrue();
+        assertThat(view.outcomes()).anySatisfy(o -> {
+            assertThat(o.stage()).isEqualTo(WorkflowStage.VERIFICATION);
+            assertThat(o.verificationStatus()).contains(VerificationStatus.FAILED);
+            assertThat(o.attemptKind()).isEqualTo(AttemptKind.CONTENT_CORRECTION);
+        });
+    }
+
+    @Test
+    void terminalWorkflows_remainImmutable_acrossNewRetryBehavior() {
+        WorkflowEngineImpl completedEngine = engine(alwaysPass, alwaysVerify);
+        WorkflowView started = completedEngine.start("task", targetRepo.toString());
+        WorkflowView completed = completedEngine.approve(completedEngine.approve(started.id()).id());
+        assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThatThrownBy(() -> completedEngine.retryStage(completed.id(), true))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> completedEngine.approve(completed.id()))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(completedEngine.status(completed.id()).status()).isEqualTo(WorkflowStatus.COMPLETED);
+
+        WorkflowEngineImpl cancelledEngine = engine(alwaysPass, alwaysVerify);
+        WorkflowView started2 = cancelledEngine.start("task", targetRepo.toString());
+        WorkflowView cancelled = cancelledEngine.reject(started2.id());
+        assertThat(cancelled.status()).isEqualTo(WorkflowStatus.CANCELLED);
+        assertThatThrownBy(() -> cancelledEngine.retryStage(cancelled.id(), false))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> cancelledEngine.approve(cancelled.id()))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(cancelledEngine.status(cancelled.id()).status()).isEqualTo(WorkflowStatus.CANCELLED);
+    }
+
+    @Test
+    void failedWorkflow_afterBudgetExhaustion_rejectsRetryAndGates() {
+        StageRunner failingReview = (stage, workflow, context) ->
+                stage == WorkflowStage.REVIEW
+                        ? StageOutcome.failure(stage, "reviewer crashed")
+                        : stage == WorkflowStage.CHANGE_PROPOSAL
+                                ? StageOutcome.changeProposed(stage, "ok", CHANGE_ID)
+                                : StageOutcome.success(stage, "ok");
+        WorkflowEngineImpl engine = engine(failingReview, alwaysVerify, new RetryProperties(1, 5));
+        WorkflowView view = engine.start("task", targetRepo.toString());
+        view = engine.approve(view.id());
+
+        assertThat(view.status()).isEqualTo(WorkflowStatus.FAILED);
+
+        WorkflowId failedId = view.id();
+        assertThatThrownBy(() -> engine.retryStage(failedId, true))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> engine.approve(failedId))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> engine.reject(failedId))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> engine.requestRevisions(failedId, ""))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> engine.requestFurtherWork(failedId, ""))
+                .isInstanceOf(IllegalStateException.class);
+
+        assertThat(engine.status(failedId).status()).isEqualTo(WorkflowStatus.FAILED);
     }
 
     // --- helpers ---

@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.shell.core.command.annotation.Argument;
 import org.springframework.shell.core.command.annotation.Command;
 import org.springframework.shell.core.command.annotation.CommandGroup;
+import org.springframework.shell.core.command.annotation.Option;
 
 /** Shell commands to drive the pi-flow workflow. */
 @CommandGroup
@@ -54,9 +55,12 @@ public class FlowCommands {
         return render(engine.requestFurtherWork(parse(id), feedback));
     }
 
-    @Command(name = "flow-retry-verification", description = "Retry verification after fixing the verification configuration")
-    public String retryVerification(@Argument(index = 0, description = "Workflow id") String id) {
-        return render(engine.retryVerification(parse(id)));
+    @Command(name = "flow-retry", description = "Retry a paused stage, or re-check verification configuration after a NOT_CONFIGURED pause")
+    public String retry(@Argument(index = 0, description = "Workflow id") String id,
+                        @Option(longName = "acknowledge-partial-changes", defaultValue = "false",
+                                description = "Acknowledge that partial changes may be present (required to retry CHANGE_PROPOSAL or IMPLEMENTATION)")
+                        boolean acknowledgePartialChanges) {
+        return render(engine.retryStage(parse(id), acknowledgePartialChanges));
     }
 
     private WorkflowId parse(String id) {

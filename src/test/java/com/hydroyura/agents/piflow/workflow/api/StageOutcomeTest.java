@@ -61,4 +61,49 @@ class StageOutcomeTest {
         assertThat(outcome.verdict()).isEmpty();
         assertThat(outcome.findings()).isEmpty();
     }
+
+    @Test
+    void defaultFactories_shouldProduceInitialAttemptKind() {
+        assertThat(StageOutcome.success(WorkflowStage.REVIEW, "ok").attemptKind()).isEqualTo(AttemptKind.INITIAL);
+        assertThat(StageOutcome.failure(WorkflowStage.REVIEW, "err").attemptKind()).isEqualTo(AttemptKind.INITIAL);
+        assertThat(StageOutcome.reviewed(WorkflowStage.REVIEW, "ok", ReviewVerdict.APPROVED, List.of()).attemptKind())
+                .isEqualTo(AttemptKind.INITIAL);
+        assertThat(StageOutcome.verified(WorkflowStage.VERIFICATION, "ok", VerificationStatus.PASSED).attemptKind())
+                .isEqualTo(AttemptKind.INITIAL);
+        assertThat(StageOutcome.changeProposed(WorkflowStage.CHANGE_PROPOSAL, "ok", "change-a").attemptKind())
+                .isEqualTo(AttemptKind.INITIAL);
+    }
+
+    @Test
+    void technicalRetry_shouldProduceTechnicalRetryAttemptKind() {
+        StageOutcome outcome = StageOutcome.technicalRetry(WorkflowStage.REVIEW, "retry");
+
+        assertThat(outcome.attemptKind()).isEqualTo(AttemptKind.TECHNICAL_RETRY);
+        assertThat(outcome.success()).isFalse();
+    }
+
+    @Test
+    void contentCorrection_shouldProduceContentCorrectionAttemptKind() {
+        StageOutcome outcome = StageOutcome.contentCorrection(WorkflowStage.REVIEW, "correction");
+
+        assertThat(outcome.attemptKind()).isEqualTo(AttemptKind.CONTENT_CORRECTION);
+        assertThat(outcome.success()).isFalse();
+    }
+
+    @Test
+    void withAttemptKind_shouldPreserveAllOtherFields() {
+        StageOutcome outcome = StageOutcome.reviewed(
+                WorkflowStage.REVIEW, "ok", ReviewVerdict.CHANGES_REQUIRED, List.of("finding"));
+
+        StageOutcome reclassified = outcome.withAttemptKind(AttemptKind.CONTENT_CORRECTION);
+
+        assertThat(reclassified.attemptKind()).isEqualTo(AttemptKind.CONTENT_CORRECTION);
+        assertThat(reclassified.stage()).isEqualTo(outcome.stage());
+        assertThat(reclassified.success()).isEqualTo(outcome.success());
+        assertThat(reclassified.output()).isEqualTo(outcome.output());
+        assertThat(reclassified.verdict()).isEqualTo(outcome.verdict());
+        assertThat(reclassified.findings()).isEqualTo(outcome.findings());
+        assertThat(reclassified.verificationStatus()).isEqualTo(outcome.verificationStatus());
+        assertThat(reclassified.changeId()).isEqualTo(outcome.changeId());
+    }
 }

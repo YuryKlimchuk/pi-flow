@@ -33,6 +33,12 @@ public class Workflow {
     @Getter(AccessLevel.NONE)
     private String approvalFingerprint;
 
+    @Getter(AccessLevel.NONE)
+    private int technicalRetryCount = 0;
+
+    @Getter(AccessLevel.NONE)
+    private int contentCorrectionCount = 0;
+
     public Workflow(WorkflowId id, String task, String targetRepo) {
         this.id = Objects.requireNonNull(id, "id must not be null");
         this.task = Objects.requireNonNull(task, "task must not be null");
@@ -95,6 +101,7 @@ public class Workflow {
 
     public void moveTo(WorkflowStage stage) {
         this.currentStage = Objects.requireNonNull(stage, "stage must not be null");
+        this.technicalRetryCount = 0;
     }
 
     public void markInProgress() {
@@ -103,6 +110,10 @@ public class Workflow {
 
     public void markAwaitingUser() {
         this.status = WorkflowStatus.AWAITING_USER;
+    }
+
+    public void markPaused() {
+        this.status = WorkflowStatus.PAUSED;
     }
 
     public void markCompleted() {
@@ -121,6 +132,24 @@ public class Workflow {
         return status == WorkflowStatus.COMPLETED
                 || status == WorkflowStatus.CANCELLED
                 || status == WorkflowStatus.FAILED;
+    }
+
+    /** Number of technical-failure attempts recorded for the current stage-attempt-sequence. */
+    public int technicalRetryCount() {
+        return technicalRetryCount;
+    }
+
+    /** Number of content-correction loops recorded for the whole workflow. */
+    public int contentCorrectionCount() {
+        return contentCorrectionCount;
+    }
+
+    public void incrementTechnicalRetryCount() {
+        technicalRetryCount++;
+    }
+
+    public void incrementContentCorrectionCount() {
+        contentCorrectionCount++;
     }
 
     /**

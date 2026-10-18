@@ -1,5 +1,6 @@
 package com.hydroyura.agents.piflow.workflow.application;
 
+import com.hydroyura.agents.piflow.workflow.api.AttemptKind;
 import com.hydroyura.agents.piflow.workflow.api.ReviewVerdict;
 import com.hydroyura.agents.piflow.workflow.api.StageOutcome;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowEngine;
@@ -18,7 +19,12 @@ import org.springframework.stereotype.Service;
 @Service
 public class WorkflowEngineImpl implements WorkflowEngine {
 
-    private static final int MAX_ADVANCE_STEPS = 50;
+    /**
+     * Purely defensive infinite-loop safety net. It is deliberately much larger than any
+     * configured retry/correction budget so it is never the product-facing limit; the
+     * {@link RetryProperties} budgets are the only limits the workflow can actually reach.
+     */
+    private static final int MAX_ADVANCE_STEPS = 10_000;
 
     private final WorkflowRepository repository;
     private final StageRunner stageRunner;
@@ -27,10 +33,12 @@ public class WorkflowEngineImpl implements WorkflowEngine {
     private final ChangeResolver changeResolver;
     private final ChangeValidator changeValidator;
     private final ArtifactFingerprint fingerprint;
+    private final RetryProperties retryProperties;
 
     public WorkflowEngineImpl(WorkflowRepository repository, StageRunner stageRunner, Verifier verifier,
                               WorktreeCheck worktreeCheck, ChangeResolver changeResolver,
-                              ChangeValidator changeValidator, ArtifactFingerprint fingerprint) {
+                              ChangeValidator changeValidator, ArtifactFingerprint fingerprint,
+                              RetryProperties retryProperties) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.stageRunner = Objects.requireNonNull(stageRunner, "stageRunner must not be null");
         this.verifier = Objects.requireNonNull(verifier, "verifier must not be null");
@@ -38,6 +46,7 @@ public class WorkflowEngineImpl implements WorkflowEngine {
         this.changeResolver = Objects.requireNonNull(changeResolver, "changeResolver must not be null");
         this.changeValidator = Objects.requireNonNull(changeValidator, "changeValidator must not be null");
         this.fingerprint = Objects.requireNonNull(fingerprint, "fingerprint must not be null");
+        this.retryProperties = Objects.requireNonNull(retryProperties, "retryProperties must not be null");
     }
 
     @Override
@@ -109,9 +118,25 @@ public class WorkflowEngineImpl implements WorkflowEngine {
     }
 
     @Override
-    public WorkflowView retryVerification(WorkflowId id) {
+    public WorkflowView retryStage(WorkflowId id, boolean acknowledgePartialChanges) {
         Workflow workflow = require(id);
-        workflow.requireAwaitingUserAt(WorkflowStage.VERIFICATION);
+        if (workflow.isTerminal()) {
+            throw new IllegalStateException("Workflow is terminal and cannot be retried: " + workflow.getStatus());
+        }
+        boolean pausedAtEligibleStage = workflow.getStatus() == WorkflowStatus.PAUSED
+                && isRetryEligibleStage(workflow.getCurrentStage());
+        boolean notConfiguredPause = isNotConfiguredVerificationPause(workflow);
+        if (!pausedAtEligibleStage && !notConfiguredPause) {
+            throw new IllegalStateException("Workflow is not in a retryable state: stage "
+                    + workflow.getCurrentStage() + ", status " + workflow.getStatus());
+        }
+        if (isWriteStage(workflow.getCurrentStage()) && !acknowledgePartialChanges) {
+            throw new IllegalStateException("Retrying write stage " + workflow.getCurrentStage()
+                    + " requires --acknowledge-partial-changes");
+        }
+        if (workflow.technicalRetryCount() >= retryProperties.maxTechnicalRetries()) {
+            throw new IllegalStateException("Technical-retry budget exhausted for stage " + workflow.getCurrentStage());
+        }
         workflow.markInProgress();
         advance(workflow);
         repository.save(workflow);
@@ -129,7 +154,7 @@ public class WorkflowEngineImpl implements WorkflowEngine {
             WorkflowStage stage = workflow.getCurrentStage();
             switch (stage) {
                 case TASK_SETUP -> {
-                    workflow.recordOutcome(StageOutcome.success(stage, ""));
+                    recordOutcome(workflow, StageOutcome.success(stage, ""));
                     workflow.moveTo(WorkflowStage.PROJECT_ANALYSIS);
                 }
                 case PROJECT_ANALYSIS -> {
@@ -138,15 +163,14 @@ public class WorkflowEngineImpl implements WorkflowEngine {
                     try {
                         outcome = stageRunner.run(stage, workflow, context);
                     } catch (RuntimeException e) {
-                        workflow.recordOutcome(StageOutcome.failure(stage, failureMessage(e)));
-                        workflow.markFailed();
+                        handleTechnicalFailure(workflow, StageOutcome.failure(stage, failureMessage(e)));
                         break;
                     }
-                    workflow.recordOutcome(outcome);
                     if (outcome.success()) {
+                        recordOutcome(workflow, outcome);
                         workflow.moveTo(WorkflowStage.CHANGE_PROPOSAL);
                     } else {
-                        workflow.markFailed();
+                        handleTechnicalFailure(workflow, outcome);
                     }
                 }
                 case CHANGE_PROPOSAL -> handleChangeProposal(workflow);
@@ -157,23 +181,21 @@ public class WorkflowEngineImpl implements WorkflowEngine {
                     try {
                         outcome = stageRunner.run(stage, workflow, context);
                     } catch (RuntimeException e) {
-                        workflow.recordOutcome(StageOutcome.failure(stage, failureMessage(e)));
-                        workflow.markFailed();
+                        handleTechnicalFailure(workflow, StageOutcome.failure(stage, failureMessage(e)));
                         break;
                     }
                     if (outcome.success() && outcome.verdict().isEmpty()) {
-                        workflow.recordOutcome(StageOutcome.failure(stage,
+                        handleTechnicalFailure(workflow, StageOutcome.failure(stage,
                                 "REVIEW stage succeeded without a ReviewVerdict (invariant violation)"));
-                        workflow.markFailed();
                         break;
                     }
-                    workflow.recordOutcome(outcome);
                     if (!outcome.success()) {
-                        workflow.markFailed();
+                        handleTechnicalFailure(workflow, outcome);
                     } else if (outcome.verdict().orElseThrow() == ReviewVerdict.APPROVED) {
+                        recordOutcome(workflow, outcome);
                         workflow.moveTo(WorkflowStage.ACCEPTANCE);
                     } else {
-                        workflow.moveTo(WorkflowStage.IMPLEMENTATION);
+                        handleContentCorrection(workflow, outcome);
                     }
                 }
                 case VALIDATION_APPROVAL -> {
@@ -186,15 +208,21 @@ public class WorkflowEngineImpl implements WorkflowEngine {
                     try {
                         result = verifier.verify(workflow);
                     } catch (RuntimeException e) {
-                        workflow.recordOutcome(StageOutcome.failure(stage, failureMessage(e)));
-                        workflow.markFailed();
+                        handleTechnicalFailure(workflow, StageOutcome.failure(stage, failureMessage(e)));
                         break;
                     }
-                    workflow.recordOutcome(StageOutcome.verified(stage, result.report(), result.status()));
+                    StageOutcome outcome = StageOutcome.verified(stage, result.report(), result.status());
                     switch (result.status()) {
-                        case PASSED -> workflow.moveTo(WorkflowStage.REVIEW);
-                        case FAILED -> workflow.moveTo(WorkflowStage.IMPLEMENTATION);
-                        case NOT_CONFIGURED, INFRASTRUCTURE_ERROR -> workflow.markAwaitingUser();
+                        case PASSED -> {
+                            recordOutcome(workflow, outcome);
+                            workflow.moveTo(WorkflowStage.REVIEW);
+                        }
+                        case FAILED -> handleContentCorrection(workflow, outcome);
+                        case NOT_CONFIGURED -> {
+                            recordOutcome(workflow, outcome);
+                            workflow.markAwaitingUser();
+                        }
+                        case INFRASTRUCTURE_ERROR -> handleTechnicalFailure(workflow, outcome);
                     }
                 }
                 case COMPLETED -> workflow.markCompleted();
@@ -210,16 +238,14 @@ public class WorkflowEngineImpl implements WorkflowEngine {
         try {
             outcome = stageRunner.run(stage, workflow, context);
         } catch (RuntimeException e) {
-            workflow.recordOutcome(StageOutcome.failure(stage, failureMessage(e)));
-            workflow.markFailed();
+            handleTechnicalFailure(workflow, StageOutcome.failure(stage, failureMessage(e)));
             return;
         }
-        workflow.recordOutcome(outcome);
-
         if (!outcome.success()) {
-            workflow.markFailed();
+            handleTechnicalFailure(workflow, outcome);
             return;
         }
+        recordOutcome(workflow, outcome);
 
         String candidate = outcome.changeId().orElse(null);
         if (candidate == null || candidate.isBlank()) {
@@ -273,16 +299,82 @@ public class WorkflowEngineImpl implements WorkflowEngine {
         try {
             outcome = stageRunner.run(stage, workflow, context);
         } catch (RuntimeException e) {
-            workflow.recordOutcome(StageOutcome.failure(stage, failureMessage(e)));
-            workflow.markFailed();
+            handleTechnicalFailure(workflow, StageOutcome.failure(stage, failureMessage(e)));
             return;
         }
-        workflow.recordOutcome(outcome);
         if (outcome.success()) {
+            recordOutcome(workflow, outcome);
             workflow.moveTo(WorkflowStage.VERIFICATION);
         } else {
-            workflow.markFailed();
+            handleTechnicalFailure(workflow, outcome);
         }
+    }
+
+    /**
+     * Records a technical failure (process crash, timeout, or malformed output) and routes it
+     * through the technical-retry budget: {@code PAUSED} while budget remains, {@code FAILED}
+     * once the budget is exhausted. The attempt is recorded with {@code INITIAL} kind on the
+     * stage's first failure and {@code TECHNICAL_RETRY} on every subsequent failure.
+     */
+    private void handleTechnicalFailure(Workflow workflow, StageOutcome outcome) {
+        recordOutcome(workflow, outcome);
+        workflow.incrementTechnicalRetryCount();
+        if (workflow.technicalRetryCount() >= retryProperties.maxTechnicalRetries()) {
+            workflow.markFailed();
+        } else {
+            workflow.markPaused();
+        }
+    }
+
+    /**
+     * Records a content-correction loop (a {@code CHANGES_REQUIRED} review verdict or a nonzero-exit
+     * verification result) and routes back to {@code IMPLEMENTATION} while the content-correction
+     * budget remains, or marks the workflow {@code FAILED} once it is exhausted.
+     */
+    private void handleContentCorrection(Workflow workflow, StageOutcome outcome) {
+        workflow.recordOutcome(outcome.withAttemptKind(AttemptKind.CONTENT_CORRECTION));
+        workflow.incrementContentCorrectionCount();
+        if (workflow.contentCorrectionCount() >= retryProperties.maxContentCorrections()) {
+            workflow.markFailed();
+        } else {
+            workflow.moveTo(WorkflowStage.IMPLEMENTATION);
+        }
+    }
+
+    private void recordOutcome(Workflow workflow, StageOutcome outcome) {
+        workflow.recordOutcome(outcome.withAttemptKind(currentAttemptKind(workflow)));
+    }
+
+    private AttemptKind currentAttemptKind(Workflow workflow) {
+        return workflow.technicalRetryCount() > 0 ? AttemptKind.TECHNICAL_RETRY : AttemptKind.INITIAL;
+    }
+
+    private static boolean isRetryEligibleStage(WorkflowStage stage) {
+        return stage == WorkflowStage.PROJECT_ANALYSIS
+                || stage == WorkflowStage.REVIEW
+                || stage == WorkflowStage.VERIFICATION
+                || stage == WorkflowStage.CHANGE_PROPOSAL
+                || stage == WorkflowStage.IMPLEMENTATION;
+    }
+
+    private static boolean isWriteStage(WorkflowStage stage) {
+        return stage == WorkflowStage.CHANGE_PROPOSAL || stage == WorkflowStage.IMPLEMENTATION;
+    }
+
+    private boolean isNotConfiguredVerificationPause(Workflow workflow) {
+        if (workflow.getCurrentStage() != WorkflowStage.VERIFICATION
+                || workflow.getStatus() != WorkflowStatus.AWAITING_USER) {
+            return false;
+        }
+        return lastOutcome(workflow)
+                .flatMap(StageOutcome::verificationStatus)
+                .filter(status -> status == VerificationStatus.NOT_CONFIGURED)
+                .isPresent();
+    }
+
+    private static Optional<StageOutcome> lastOutcome(Workflow workflow) {
+        List<StageOutcome> outcomes = workflow.outcomes();
+        return outcomes.isEmpty() ? Optional.empty() : Optional.of(outcomes.get(outcomes.size() - 1));
     }
 
     private void approveAtValidationGate(Workflow workflow) {

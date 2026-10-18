@@ -47,6 +47,7 @@ pi-flow:
 - `roles` maps each agent role to a tier. See [`agent-roles.md`](agent-roles.md) for the role/stage mapping.
 - Optional overrides live under `pi-flow.agent.*`: `command` (default `pi`), `timeout` (default `5m`), `workingDirectory` (optional default working directory for agent runs).
 - `pi-flow.verification.config-path` (default `.pi-flow/verify.json`) is the only startup-bound verification setting; it configures *where to look* for the per-target-repository verification file, not what to run. The verification command, timeout, and working directory are read fresh from that file on every verification attempt, so they can be changed at runtime without restarting the orchestrator.
+- Retry and correction budgets live under `pi-flow.retry.*`: `max-technical-retries` (default `3`) bounds technical-failure attempts per stage, and `max-content-corrections` (default `5`) bounds content-correction loops per workflow. Both are commented out in `application.yaml` by default; auto-retry is disabled and there is no configuration to enable unattended retry.
 
 ## 3. Target repository prerequisites
 
@@ -69,7 +70,7 @@ git init /path/to/target-repo    # or use any existing repository
   }
   ```
 
-  `command` is a non-empty array of strings, `timeoutSeconds` is a positive integer, and `workingDirectory` is optional (defaults to the target repository root). The file is re-read fresh on every verification attempt; if it is missing or invalid, the workflow pauses at `VERIFICATION` (`AWAITING_USER`) and can be retried with `flow-retry-verification` after the file is added or fixed — no restart required.
+  `command` is a non-empty array of strings, `timeoutSeconds` is a positive integer, and `workingDirectory` is optional (defaults to the target repository root). The file is re-read fresh on every verification attempt; if it is missing the workflow pauses at `VERIFICATION` (`AWAITING_USER`) and can be retried with `flow-retry` after the file is added — no restart required. If it is present but invalid, the command cannot be started, or the command times out, the workflow pauses at `VERIFICATION` (`PAUSED`) as a technical failure and is retried with `flow-retry`.
 
 ## 4. Build and run
 
@@ -91,7 +92,7 @@ Flow Commands
 	flow-reject:  Reject the proposal (cancels the workflow)
 	flow-revise:  Request revisions to the proposal
 	flow-rework:  Request further work after review
-	flow-retry-verification: Retry verification after fixing the verification configuration
+	flow-retry:   Retry a paused stage, or re-check verification configuration after a NOT_CONFIGURED pause
 	flow-start:   Start a workflow for a task against a target repository
 	flow-status:  Show a workflow's current stage and status
 ```
@@ -166,6 +167,6 @@ At any point, `flow-status <id>` shows the current `stage` and `status`.
 ## 7. Known limitations
 
 - **Single session per workflow** — state is in-memory; keep the shell open for the whole run.
-- **Transient agent failures** — if a stage's Pi run errors, the workflow is marked `FAILED` with no automatic retry; start a new `flow-start`.
+- **Transient agent failures** — a technical failure pauses the workflow at `PAUSED` (or marks it `FAILED` once the technical-retry budget is exhausted); recover with `flow-retry` (adding `--acknowledge-partial-changes` when retrying `CHANGE_PROPOSAL` or `IMPLEMENTATION`). There is no automatic retry.
 - **Non-interactive mode** — launching with `--spring.shell.interactive.enabled=false` is limited: multi-word arguments are split on whitespace, and the process may not exit cleanly after a Pi run. Prefer the interactive shell.
 - **Stages are provisional** — stage names and order may change; see [`workflow.md`](workflow.md).

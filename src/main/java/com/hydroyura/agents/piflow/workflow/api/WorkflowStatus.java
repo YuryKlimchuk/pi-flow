@@ -4,6 +4,7 @@ package com.hydroyura.agents.piflow.workflow.api;
 public enum WorkflowStatus {
     IN_PROGRESS,
     AWAITING_USER,
+    PAUSED,
     COMPLETED,
     CANCELLED,
     FAILED
