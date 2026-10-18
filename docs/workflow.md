@@ -15,7 +15,7 @@ The end-to-end pi-flow workflow, step by step, with the actions of each particip
 | Change proposal | Architect | Change artifacts in the target repository |
 | Validation & approval | Orchestrator + User | Approved, revisions requested, or rejected/cancelled |
 | Implementation | Developer | Code changes |
-| Automated verification | Orchestrator | Verification passed or failed |
+| Automated verification | Orchestrator | Four-valued verification result (`PASSED` / `FAILED` / `NOT_CONFIGURED` / `INFRASTRUCTURE_ERROR`) |
 | Review | Reviewer (QA) | Structured verdict (`APPROVED` or `CHANGES_REQUIRED`) and findings extracted from the reviewer's JSON output |
 | Corrections | Orchestrator + Developer | Loop back until acceptable |
 | Completion | User + orchestrator | Accepted result, further work requested, or cancelled |
@@ -132,8 +132,12 @@ Gate commands (`flow-approve`, `flow-reject`, `flow-revise`, `flow-rework`) act 
    - *Developer*: implements the change in the target repository.
    - *Orchestrator*: records the implementation outcome.
 6. **Automated verification** — a loop that repeats until verification passes:
-   - *Orchestrator*: runs the configured checks deterministically and records the verification outcome.
-   - *If verification fails*: the Developer applies corrections and the loop repeats; the workflow does not proceed to review until verification passes.
+   - *Orchestrator*: reads the target repository's verification configuration file fresh on every attempt and runs the configured command deterministically, recording a four-valued outcome.
+   - *Outcome `PASSED`*: the workflow proceeds to review.
+   - *Outcome `FAILED`*: the configured command ran to completion and reported a problem; the Developer applies corrections and the loop repeats. The workflow does not proceed to review until verification passes.
+   - *Outcome `NOT_CONFIGURED` or `INFRASTRUCTURE_ERROR`*: verification could not run (no configuration file, or the file/command is broken). The workflow pauses in `AWAITING_USER` at the `VERIFICATION` stage — not `FAILED`, not a correction loop — and is recoverable via `flow-retry-verification` once the configuration is fixed, in the same running process.
+
+   **Verification configuration.** The command to run is read from a per-target-repository JSON file (default `.pi-flow/verify.json`, path overridable via `pi-flow.verification.config-path`), re-read fresh on every attempt so a user can create or fix it without restarting the application. The fixed schema is a JSON object with `command` (non-empty array of strings), `timeoutSeconds` (positive integer), and optional `workingDirectory` (defaults to the target repository root). The verifier never invokes any command other than the one in this user-authored file.
 7. **Review** — a loop that repeats on corrections:
    - *Orchestrator*: delegates the stage to the Reviewer with the task, approved artifacts, code changes, and verification results.
    - *Reviewer (QA)*: evaluates the implementation against them and returns findings.

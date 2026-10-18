@@ -96,6 +96,16 @@ public class WorkflowEngineImpl implements WorkflowEngine {
         return view(workflow);
     }
 
+    @Override
+    public WorkflowView retryVerification(WorkflowId id) {
+        Workflow workflow = require(id);
+        workflow.requireAwaitingUserAt(WorkflowStage.VERIFICATION);
+        workflow.markInProgress();
+        advance(workflow);
+        repository.save(workflow);
+        return view(workflow);
+    }
+
     private void advance(Workflow workflow) {
         int steps = 0;
         while (workflow.getStatus() == WorkflowStatus.IN_PROGRESS) {
@@ -154,18 +164,20 @@ public class WorkflowEngineImpl implements WorkflowEngine {
                 }
                 case VALIDATION_APPROVAL, ACCEPTANCE -> workflow.markAwaitingUser();
                 case VERIFICATION -> {
-                    boolean pass;
+                    VerificationResult result;
                     try {
-                        pass = verifier.verify(workflow);
+                        result = verifier.verify(workflow);
                     } catch (RuntimeException e) {
                         workflow.recordOutcome(StageOutcome.failure(stage, failureMessage(e)));
                         workflow.markFailed();
                         break;
                     }
-                    workflow.recordOutcome(pass
-                            ? StageOutcome.success(stage, "verification passed")
-                            : StageOutcome.failure(stage, "verification failed"));
-                    workflow.moveTo(pass ? WorkflowStage.REVIEW : WorkflowStage.IMPLEMENTATION);
+                    workflow.recordOutcome(StageOutcome.verified(stage, result.report(), result.status()));
+                    switch (result.status()) {
+                        case PASSED -> workflow.moveTo(WorkflowStage.REVIEW);
+                        case FAILED -> workflow.moveTo(WorkflowStage.IMPLEMENTATION);
+                        case NOT_CONFIGURED, INFRASTRUCTURE_ERROR -> workflow.markAwaitingUser();
+                    }
                 }
                 case COMPLETED -> workflow.markCompleted();
             }

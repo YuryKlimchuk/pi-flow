@@ -54,6 +54,11 @@ public class FlowCommands {
         return render(engine.requestFurtherWork(parse(id), feedback));
     }
 
+    @Command(name = "flow-retry-verification", description = "Retry verification after fixing the verification configuration")
+    public String retryVerification(@Argument(index = 0, description = "Workflow id") String id) {
+        return render(engine.retryVerification(parse(id)));
+    }
+
     private WorkflowId parse(String id) {
         return new WorkflowId(UUID.fromString(id));
     }

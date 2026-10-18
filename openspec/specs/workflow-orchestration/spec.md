@@ -58,10 +58,10 @@ When the user requests revisions at the `VALIDATION_APPROVAL` gate, the orchestr
 - **THEN** the request succeeds and the workflow returns to the `CHANGE_PROPOSAL` stage as if no specific feedback was supplied
 
 ### Requirement: Correction loop
-A failed verification, a `REVIEW` outcome carrying a `ReviewVerdict` of `CHANGES_REQUIRED`, a technical failure of the `REVIEW` stage's execution, or a failed verdict extraction SHALL return the workflow to implementation, except that a technical failure or a failed extraction SHALL mark the workflow `FAILED` instead of silently looping.
+A `FAILED` verification result, a `REVIEW` outcome carrying a `ReviewVerdict` of `CHANGES_REQUIRED`, a technical failure of the `REVIEW` stage's execution, or a failed review verdict extraction SHALL return the workflow to implementation, except that a technical failure or a failed extraction SHALL mark the workflow `FAILED` instead of silently looping. A `NOT_CONFIGURED` or `INFRASTRUCTURE_ERROR` verification result SHALL NOT be treated as a correction and SHALL NOT return the workflow to implementation.
 
 #### Scenario: verification failed
-- **WHEN** automated verification fails
+- **WHEN** the verification result is `FAILED`
 - **THEN** the workflow returns to implementation
 
 #### Scenario: review requires corrections
@@ -87,6 +87,40 @@ A failed verification, a `REVIEW` outcome carrying a `ReviewVerdict` of `CHANGES
 #### Scenario: failed verdict extraction marks the workflow failed instead of looping
 - **WHEN** the `REVIEW` stage executes without a technical error but extraction of its output into a `ReviewVerdict` and findings fails
 - **THEN** the orchestrator marks the workflow `FAILED` instead of returning it to `IMPLEMENTATION` or advancing to `ACCEPTANCE`
+
+#### Scenario: unconfigured verification does not trigger a correction loop
+- **WHEN** the verification result is `NOT_CONFIGURED`
+- **THEN** the orchestrator does not return the workflow to `IMPLEMENTATION` as if a correction were requested
+
+#### Scenario: a verification infrastructure error does not trigger a correction loop
+- **WHEN** the verification result is `INFRASTRUCTURE_ERROR`
+- **THEN** the orchestrator does not return the workflow to `IMPLEMENTATION` as if a correction were requested, and does not treat the result as equivalent to `FAILED`
+
+### Requirement: Passing verification advances to review
+A `PASSED` verification result SHALL advance the workflow to the `REVIEW` stage.
+
+#### Scenario: passed verification proceeds to review
+- **WHEN** the verification result is `PASSED`
+- **THEN** the workflow moves to the `REVIEW` stage
+
+### Requirement: Unconfigured or broken verification configuration blocks automatic progression with an explicit, recoverable state
+When the verification result is `NOT_CONFIGURED` or `INFRASTRUCTURE_ERROR`, the orchestrator SHALL NOT advance the workflow to `REVIEW` and SHALL NOT return it to `IMPLEMENTATION` as a correction. The orchestrator SHALL instead leave the workflow in a state that explicitly names the specific cause (missing configuration file vs. a specific infrastructure problem) and that is NOT a terminal status (`COMPLETED`, `CANCELLED`, `FAILED`); the workflow SHALL remain recoverable, through a retry action available while the workflow is in this state, without requiring the application to be restarted.
+
+#### Scenario: unconfigured verification pauses the workflow with a named cause
+- **WHEN** the verification result is `NOT_CONFIGURED`
+- **THEN** the workflow stops advancing automatically and its state identifies the missing verification configuration file as the cause
+
+#### Scenario: a verification infrastructure error pauses the workflow with a named cause
+- **WHEN** the verification result is `INFRASTRUCTURE_ERROR`
+- **THEN** the workflow stops advancing automatically and its state identifies the specific infrastructure problem (for example a malformed configuration file, a missing executable, or a missing working directory) as the cause
+
+#### Scenario: a paused-for-configuration workflow is not a terminal, stuck workflow
+- **WHEN** the verification result is `NOT_CONFIGURED` or `INFRASTRUCTURE_ERROR`
+- **THEN** the workflow's status is not `COMPLETED`, `CANCELLED`, or `FAILED`
+
+#### Scenario: workflow recovers after verification configuration is fixed and retried, with no restart
+- **WHEN** a workflow is paused because verification was `NOT_CONFIGURED` or `INFRASTRUCTURE_ERROR`, a valid verification configuration file is subsequently created or corrected for its target repository while the application keeps running, and the user retries verification
+- **THEN** the orchestrator re-reads the configuration file, re-runs verification, and routes the new result (`PASSED`, `FAILED`, or still `NOT_CONFIGURED`/`INFRASTRUCTURE_ERROR` if the underlying cause was not actually fixed) per the other requirements in this capability, with no restart of the application
 
 ### Requirement: Final acceptance
 After a `REVIEW` outcome carrying a `ReviewVerdict` of `APPROVED`, the user SHALL accept the result or request further work, optionally supplying free-text feedback with a further-work request. Every acceptance action SHALL require the workflow to be at the `ACCEPTANCE` stage AND in `AWAITING_USER` status; if either precondition fails, the orchestrator SHALL reject the action and leave the workflow's stage and status unchanged.

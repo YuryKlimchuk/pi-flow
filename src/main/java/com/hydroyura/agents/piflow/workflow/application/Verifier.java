@@ -5,5 +5,5 @@ import com.hydroyura.agents.piflow.workflow.domain.Workflow;
 /** Port for the deterministic automated verification stage. */
 public interface Verifier {
 
-    boolean verify(Workflow workflow);
+    VerificationResult verify(Workflow workflow);
 }

@@ -14,4 +14,6 @@ public interface WorkflowEngine {
     WorkflowView requestRevisions(WorkflowId id, String feedback);
 
     WorkflowView requestFurtherWork(WorkflowId id, String feedback);
+
+    WorkflowView retryVerification(WorkflowId id);
 }

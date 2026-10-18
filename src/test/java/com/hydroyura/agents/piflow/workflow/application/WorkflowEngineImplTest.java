@@ -10,23 +10,36 @@ import com.hydroyura.agents.piflow.workflow.api.WorkflowStage;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStatus;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowView;
 import com.hydroyura.agents.piflow.workflow.domain.Workflow;
+import com.hydroyura.agents.piflow.workflow.infrastructure.CommandVerifier;
 import com.hydroyura.agents.piflow.workflow.infrastructure.InMemoryWorkflowRepository;
+import com.hydroyura.agents.piflow.workflow.infrastructure.VerificationProperties;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class WorkflowEngineImplTest {
+
+    @TempDir
+    Path tempDir;
 
     private final InMemoryWorkflowRepository repository = new InMemoryWorkflowRepository();
     private final StageRunner alwaysPass = (stage, workflow, context) ->
             stage == WorkflowStage.REVIEW
                     ? StageOutcome.reviewed(stage, "ok", ReviewVerdict.APPROVED, List.of())
                     : StageOutcome.success(stage, "ok");
-    private final Verifier alwaysVerify = workflow -> true;
+    private final Verifier alwaysVerify = workflow -> VerificationResult.passed("verification passed", false);
 
     private WorkflowEngineImpl engine(StageRunner runner, Verifier verifier) {
         return new WorkflowEngineImpl(repository, runner, verifier);
+    }
+
+    private static long implementationCount(WorkflowView view) {
+        return view.outcomes().stream().filter(outcome -> outcome.stage() == WorkflowStage.IMPLEMENTATION).count();
     }
 
     @Test
@@ -73,13 +86,165 @@ class WorkflowEngineImplTest {
     }
 
     @Test
-    void verificationFailure_shouldLoopToImplementation() {
+    void verification_passed_shouldAdvanceToReview() {
+        WorkflowEngineImpl engine = engine(alwaysPass, alwaysVerify);
+        WorkflowView view = engine.start("task", "/repo");
+
+        view = engine.approve(view.id());
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+        assertThat(implementationCount(view)).isEqualTo(1);
+        assertThat(view.outcomes()).anySatisfy(outcome ->
+                assertThat(outcome.stage()).isEqualTo(WorkflowStage.REVIEW));
+    }
+
+    @Test
+    void verification_failed_shouldReturnToImplementation() {
         AtomicInteger verifyCalls = new AtomicInteger();
-        Verifier flaky = workflow -> verifyCalls.getAndIncrement() != 0;
+        Verifier flaky = workflow -> verifyCalls.getAndIncrement() == 0
+                ? VerificationResult.failed("verification failed", false)
+                : VerificationResult.passed("verification passed", false);
         WorkflowEngineImpl engine = engine(alwaysPass, flaky);
         WorkflowView view = engine.start("task", "/repo");
 
         view = engine.approve(view.id());
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+        assertThat(implementationCount(view)).isEqualTo(2);
+    }
+
+    @Test
+    void verification_notConfigured_shouldPauseAtVerificationStage() {
+        WorkflowEngineImpl engine = engine(alwaysPass, workflow -> VerificationResult.notConfigured("no config file"));
+        WorkflowView view = engine.start("task", "/repo");
+
+        view = engine.approve(view.id());
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.VERIFICATION);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+        StageOutcome last = view.outcomes().getLast();
+        assertThat(last.verificationStatus()).contains(VerificationStatus.NOT_CONFIGURED);
+        assertThat(last.output()).contains("no config file");
+    }
+
+    @Test
+    void verification_infrastructureError_shouldPauseAtVerificationStage() {
+        WorkflowEngineImpl engine = engine(alwaysPass,
+                workflow -> VerificationResult.infrastructureError("missing executable"));
+        WorkflowView view = engine.start("task", "/repo");
+
+        view = engine.approve(view.id());
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.VERIFICATION);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+        StageOutcome last = view.outcomes().getLast();
+        assertThat(last.verificationStatus()).contains(VerificationStatus.INFRASTRUCTURE_ERROR);
+        assertThat(last.output()).contains("missing executable");
+    }
+
+    @Test
+    void verification_pausedStates_shouldNotBeTerminal() {
+        WorkflowEngineImpl notConfigured = engine(alwaysPass, workflow -> VerificationResult.notConfigured("no config"));
+        WorkflowView view = notConfigured.start("task", "/repo");
+        view = notConfigured.approve(view.id());
+        assertThat(view.status()).isNotIn(WorkflowStatus.COMPLETED, WorkflowStatus.CANCELLED, WorkflowStatus.FAILED);
+
+        WorkflowEngineImpl infraError = engine(alwaysPass,
+                workflow -> VerificationResult.infrastructureError("broken config"));
+        view = infraError.start("task", "/repo");
+        view = infraError.approve(view.id());
+        assertThat(view.status()).isNotIn(WorkflowStatus.COMPLETED, WorkflowStatus.CANCELLED, WorkflowStatus.FAILED);
+    }
+
+    @Test
+    void verification_infrastructureError_shouldNotBeRoutedAsFailed() {
+        WorkflowEngineImpl engine = engine(alwaysPass,
+                workflow -> VerificationResult.infrastructureError("missing executable"));
+        WorkflowView view = engine.start("task", "/repo");
+
+        view = engine.approve(view.id());
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.VERIFICATION);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+        StageOutcome last = view.outcomes().getLast();
+        assertThat(last.verificationStatus()).contains(VerificationStatus.INFRASTRUCTURE_ERROR);
+        assertThat(last.output()).contains("missing executable");
+    }
+
+    @Test
+    void retryVerification_afterNotConfigured_shouldReEvaluateAndRoute() {
+        AtomicInteger verifyCalls = new AtomicInteger();
+        Verifier stub = workflow -> verifyCalls.getAndIncrement() == 0
+                ? VerificationResult.notConfigured("no config file")
+                : VerificationResult.passed("verification passed", false);
+        WorkflowEngineImpl engine = engine(alwaysPass, stub);
+        WorkflowView view = engine.start("task", "/repo");
+        view = engine.approve(view.id());
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.VERIFICATION);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+
+        view = engine.retryVerification(view.id());
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+        assertThat(view.outcomes()).anySatisfy(outcome ->
+                assertThat(outcome.stage()).isEqualTo(WorkflowStage.REVIEW));
+    }
+
+    @Test
+    void retryVerification_afterInfrastructureError_shouldReEvaluateAndRoute() {
+        AtomicInteger verifyCalls = new AtomicInteger();
+        Verifier stub = workflow -> verifyCalls.getAndIncrement() == 0
+                ? VerificationResult.infrastructureError("broken config")
+                : VerificationResult.passed("verification passed", false);
+        WorkflowEngineImpl engine = engine(alwaysPass, stub);
+        WorkflowView view = engine.start("task", "/repo");
+        view = engine.approve(view.id());
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.VERIFICATION);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+
+        view = engine.retryVerification(view.id());
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+    }
+
+    @Test
+    void retryVerification_whenNotAtVerificationGate_shouldBeRejected() {
+        Workflow workflow = new Workflow(WorkflowId.generate(), "task", "/repo");
+        workflow.moveTo(WorkflowStage.VALIDATION_APPROVAL);
+        workflow.markAwaitingUser();
+        repository.save(workflow);
+
+        WorkflowEngineImpl engine = engine(alwaysPass, alwaysVerify);
+
+        assertThatThrownBy(() -> engine.retryVerification(workflow.getId()))
+                .isInstanceOf(IllegalStateException.class);
+
+        WorkflowView after = engine.status(workflow.getId());
+        assertThat(after.currentStage()).isEqualTo(WorkflowStage.VALIDATION_APPROVAL);
+        assertThat(after.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+    }
+
+    @Test
+    void retryVerification_endToEnd_withRealCommandVerifier() throws IOException {
+        Path targetRepo = Files.createDirectories(tempDir.resolve("e2e-repo"));
+        WorkflowEngineImpl engine = engine(alwaysPass, new CommandVerifier(new VerificationProperties(null)));
+        WorkflowView view = engine.start("task", targetRepo.toString());
+        view = engine.approve(view.id());
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.VERIFICATION);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+
+        Path configDir = Files.createDirectories(targetRepo.resolve(".pi-flow"));
+        Files.writeString(configDir.resolve("verify.json"),
+                "{\"command\":[\"sh\",\"-c\",\"exit 0\"],\"timeoutSeconds\":10}");
+
+        view = engine.retryVerification(view.id());
 
         assertThat(view.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
         assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);

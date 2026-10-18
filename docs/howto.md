@@ -46,6 +46,7 @@ pi-flow:
 - `tiers` maps a tier name to a model id that must be valid for your configured Pi provider.
 - `roles` maps each agent role to a tier. See [`agent-roles.md`](agent-roles.md) for the role/stage mapping.
 - Optional overrides live under `pi-flow.agent.*`: `command` (default `pi`), `timeout` (default `5m`), `workingDirectory` (optional default working directory for agent runs).
+- `pi-flow.verification.config-path` (default `.pi-flow/verify.json`) is the only startup-bound verification setting; it configures *where to look* for the per-target-repository verification file, not what to run. The verification command, timeout, and working directory are read fresh from that file on every verification attempt, so they can be changed at runtime without restarting the orchestrator.
 
 ## 3. Target repository prerequisites
 
@@ -58,6 +59,17 @@ git init /path/to/target-repo    # or use any existing repository
 - It may be empty or contain code; the Analyst inspects whatever is there.
 - **No OpenSpec setup is required beforehand.** The Architect stage runs `openspec init` and creates the `openspec/` directory inside the target repository.
 - Agent skills and system prompts are bundled with the orchestrator or loaded from the global Pi configuration — they do **not** need to be placed in the target repository.
+- **Verification configuration file** (optional until the verification stage): to run a deterministic check at the `VERIFICATION` stage, place a JSON file at `.pi-flow/verify.json` inside the target repository (path overridable via `pi-flow.verification.config-path`):
+
+  ```json
+  {
+    "command": ["./gradlew", "check"],
+    "timeoutSeconds": 300,
+    "workingDirectory": "/optional/path"
+  }
+  ```
+
+  `command` is a non-empty array of strings, `timeoutSeconds` is a positive integer, and `workingDirectory` is optional (defaults to the target repository root). The file is re-read fresh on every verification attempt; if it is missing or invalid, the workflow pauses at `VERIFICATION` (`AWAITING_USER`) and can be retried with `flow-retry-verification` after the file is added or fixed — no restart required.
 
 ## 4. Build and run
 
@@ -79,6 +91,7 @@ Flow Commands
 	flow-reject:  Reject the proposal (cancels the workflow)
 	flow-revise:  Request revisions to the proposal
 	flow-rework:  Request further work after review
+	flow-retry-verification: Retry verification after fixing the verification configuration
 	flow-start:   Start a workflow for a task against a target repository
 	flow-status:  Show a workflow's current stage and status
 ```
