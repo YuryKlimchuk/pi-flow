@@ -6,8 +6,8 @@ pi-flow:
   agents:
     tiers:
       cheap: deepseek/deepseek-v4-pro
-      medium: anthropic/claude-sonnet-4
-      expensive: anthropic/claude-opus-4
+      medium: deepseek/deepseek-v4-pro
+      expensive: deepseek/deepseek-v4-pro
     roles:
       analyst: cheap
       architect: medium

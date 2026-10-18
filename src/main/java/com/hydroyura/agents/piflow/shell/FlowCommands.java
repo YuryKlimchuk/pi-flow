@@ -62,7 +62,7 @@ public class FlowCommands {
         sb.append("stage=").append(view.currentStage()).append('\n');
         sb.append("status=").append(view.status()).append('\n');
         if (!view.outcomes().isEmpty()) {
-            StageOutcome last = view.outcomes().get(view.outcomes().size() - 1);
+            StageOutcome last = view.outcomes().getLast();
             sb.append("lastOutput=").append(last.output()).append('\n');
         }
         return sb.toString();
