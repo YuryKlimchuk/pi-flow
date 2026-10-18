@@ -63,4 +63,23 @@ class WorkflowTest {
         assertThatThrownBy(() -> workflow.requireAwaitingUserAt(WorkflowStage.VALIDATION_APPROVAL))
                 .isInstanceOf(IllegalStateException.class);
     }
+
+    @Test
+    void recordPendingFeedback_consume_shouldReturnValueThenResetToEmpty() {
+        Workflow workflow = new Workflow(WorkflowId.generate(), "task", "/repo");
+        workflow.recordPendingFeedback("the error handling section is missing");
+
+        assertThat(workflow.consumePendingFeedback()).isEqualTo("the error handling section is missing");
+        assertThat(workflow.consumePendingFeedback()).isEmpty();
+    }
+
+    @Test
+    void recordPendingFeedback_emptyString_shouldBeAcceptedAndConsumedAsEmpty() {
+        Workflow workflow = new Workflow(WorkflowId.generate(), "task", "/repo");
+
+        assertThatCode(() -> workflow.recordPendingFeedback(""))
+                .doesNotThrowAnyException();
+
+        assertThat(workflow.consumePendingFeedback()).isEmpty();
+    }
 }

@@ -3,6 +3,7 @@ package com.hydroyura.agents.piflow.workflow.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.hydroyura.agents.piflow.workflow.api.ReviewVerdict;
 import com.hydroyura.agents.piflow.workflow.api.StageOutcome;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowId;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStage;
@@ -10,13 +11,18 @@ import com.hydroyura.agents.piflow.workflow.api.WorkflowStatus;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowView;
 import com.hydroyura.agents.piflow.workflow.domain.Workflow;
 import com.hydroyura.agents.piflow.workflow.infrastructure.InMemoryWorkflowRepository;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class WorkflowEngineImplTest {
 
     private final InMemoryWorkflowRepository repository = new InMemoryWorkflowRepository();
-    private final StageRunner alwaysPass = (stage, workflow) -> StageOutcome.success(stage, "ok");
+    private final StageRunner alwaysPass = (stage, workflow, context) ->
+            stage == WorkflowStage.REVIEW
+                    ? StageOutcome.reviewed(stage, "ok", ReviewVerdict.APPROVED, List.of())
+                    : StageOutcome.success(stage, "ok");
     private final Verifier alwaysVerify = workflow -> true;
 
     private WorkflowEngineImpl engine(StageRunner runner, Verifier verifier) {
@@ -60,27 +66,9 @@ class WorkflowEngineImplTest {
         WorkflowEngineImpl engine = engine(alwaysPass, alwaysVerify);
         WorkflowView view = engine.start("task", "/repo");
 
-        view = engine.requestRevisions(view.id());
+        view = engine.requestRevisions(view.id(), "");
 
         assertThat(view.currentStage()).isEqualTo(WorkflowStage.VALIDATION_APPROVAL);
-        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
-    }
-
-    @Test
-    void reviewFailure_shouldLoopToImplementationAndRetry() {
-        AtomicInteger reviewCalls = new AtomicInteger();
-        StageRunner runner = (stage, workflow) -> {
-            if (stage == WorkflowStage.REVIEW && reviewCalls.getAndIncrement() == 0) {
-                return StageOutcome.failure(stage, "needs corrections");
-            }
-            return StageOutcome.success(stage, "ok");
-        };
-        WorkflowEngineImpl engine = engine(runner, alwaysVerify);
-        WorkflowView view = engine.start("task", "/repo");
-
-        view = engine.approve(view.id());
-
-        assertThat(view.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
         assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
     }
 
@@ -179,7 +167,7 @@ class WorkflowEngineImplTest {
 
         WorkflowEngineImpl engine = engine(alwaysPass, alwaysVerify);
 
-        assertThatThrownBy(() -> engine.requestFurtherWork(workflow.getId()))
+        assertThatThrownBy(() -> engine.requestFurtherWork(workflow.getId(), ""))
                 .isInstanceOf(IllegalStateException.class);
 
         WorkflowView after = engine.status(workflow.getId());
@@ -189,7 +177,7 @@ class WorkflowEngineImplTest {
 
     @Test
     void stageRunnerException_shouldRecordFailureAndMarkFailed() {
-        StageRunner throwing = (stage, workflow) -> {
+        StageRunner throwing = (stage, workflow, context) -> {
             if (stage == WorkflowStage.IMPLEMENTATION) {
                 throw new RuntimeException("boom");
             }
@@ -228,7 +216,7 @@ class WorkflowEngineImplTest {
 
     @Test
     void stageRunnerError_shouldPropagateUncaught() {
-        StageRunner errorThrowing = (stage, workflow) -> {
+        StageRunner errorThrowing = (stage, workflow, context) -> {
             if (stage == WorkflowStage.PROJECT_ANALYSIS) {
                 throw new AssertionError("fatal");
             }
@@ -238,5 +226,184 @@ class WorkflowEngineImplTest {
 
         assertThatThrownBy(() -> engine.start("task", "/repo"))
                 .isInstanceOf(AssertionError.class);
+    }
+
+    @Test
+    void advance_shouldThreadPriorOutcomesIntoStageContext() {
+        List<StageContext> contexts = new ArrayList<>();
+        StageRunner recording = (stage, workflow, context) -> {
+            contexts.add(context);
+            return switch (stage) {
+                case PROJECT_ANALYSIS -> StageOutcome.success(stage, "analysis-output");
+                case CHANGE_PROPOSAL -> StageOutcome.success(stage, "proposal-output");
+                case REVIEW -> StageOutcome.reviewed(stage, "reviewed", ReviewVerdict.APPROVED, List.of());
+                default -> StageOutcome.success(stage, "ok");
+            };
+        };
+        WorkflowEngineImpl engine = engine(recording, alwaysVerify);
+        WorkflowView view = engine.start("task", "/repo");
+        view = engine.approve(view.id());
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
+        assertThat(contexts).hasSize(4);
+        assertThat(contexts.get(1).analysisFindings()).contains("analysis-output");
+        assertThat(contexts.get(1).proposalOutput()).isEmpty();
+        assertThat(contexts.get(2).analysisFindings()).contains("analysis-output");
+        assertThat(contexts.get(2).proposalOutput()).contains("proposal-output");
+        assertThat(contexts.get(3).analysisFindings()).contains("analysis-output");
+        assertThat(contexts.get(3).proposalOutput()).contains("proposal-output");
+    }
+
+    @Test
+    void projectAnalysisStageContext_shouldHaveNoPriorFindings() {
+        List<StageContext> contexts = new ArrayList<>();
+        StageRunner recording = (stage, workflow, context) -> {
+            contexts.add(context);
+            return stage == WorkflowStage.REVIEW
+                    ? StageOutcome.reviewed(stage, "ok", ReviewVerdict.APPROVED, List.of())
+                    : StageOutcome.success(stage, "ok");
+        };
+        engine(recording, alwaysVerify).start("task", "/repo");
+
+        assertThat(contexts).isNotEmpty();
+        StageContext first = contexts.getFirst();
+        assertThat(first.analysisFindings()).isEmpty();
+        assertThat(first.proposalOutput()).isEmpty();
+    }
+
+    @Test
+    void consumedFeedback_shouldNotLeakIntoLaterStages() {
+        List<StageContext> contexts = new ArrayList<>();
+        StageRunner recording = (stage, workflow, context) -> {
+            contexts.add(context);
+            return stage == WorkflowStage.REVIEW
+                    ? StageOutcome.reviewed(stage, "ok", ReviewVerdict.APPROVED, List.of())
+                    : StageOutcome.success(stage, "ok");
+        };
+        WorkflowEngineImpl engine = engine(recording, alwaysVerify);
+        WorkflowView view = engine.start("task", "/repo");
+        view = engine.requestRevisions(view.id(), "fix this");
+        view = engine.approve(view.id());
+
+        assertThat(contexts).hasSize(5);
+        assertThat(contexts.get(2).pendingFeedback()).contains("fix this");
+        assertThat(contexts.get(3).pendingFeedback()).isEmpty();
+        assertThat(contexts.get(4).pendingFeedback()).isEmpty();
+    }
+
+    @Test
+    void requestRevisions_withFeedback_shouldThreadFeedbackIntoNextProposalStage() {
+        List<StageContext> contexts = new ArrayList<>();
+        StageRunner recording = (stage, workflow, context) -> {
+            contexts.add(context);
+            return stage == WorkflowStage.REVIEW
+                    ? StageOutcome.reviewed(stage, "ok", ReviewVerdict.APPROVED, List.of())
+                    : StageOutcome.success(stage, "ok");
+        };
+        WorkflowEngineImpl engine = engine(recording, alwaysVerify);
+        WorkflowView view = engine.start("task", "/repo");
+        view = engine.requestRevisions(view.id(), "the error handling section is missing");
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.VALIDATION_APPROVAL);
+        assertThat(contexts.getLast().pendingFeedback()).contains("the error handling section is missing");
+    }
+
+    @Test
+    void requestFurtherWork_withFeedback_shouldThreadFeedbackIntoNextImplementationStage() {
+        List<StageContext> contexts = new ArrayList<>();
+        StageRunner recording = (stage, workflow, context) -> {
+            contexts.add(context);
+            return stage == WorkflowStage.REVIEW
+                    ? StageOutcome.reviewed(stage, "ok", ReviewVerdict.APPROVED, List.of())
+                    : StageOutcome.success(stage, "ok");
+        };
+        WorkflowEngineImpl engine = engine(recording, alwaysVerify);
+        WorkflowView view = engine.start("task", "/repo");
+        view = engine.approve(view.id());
+        view = engine.requestFurtherWork(view.id(), "please add a test for the empty-input case");
+
+        assertThat(contexts).hasSize(6);
+        assertThat(contexts.get(4).pendingFeedback()).contains("please add a test for the empty-input case");
+        assertThat(contexts.get(5).pendingFeedback()).isEmpty();
+    }
+
+    @Test
+    void requestRevisions_withEmptyFeedback_shouldSucceed() {
+        WorkflowEngineImpl engine = engine(alwaysPass, alwaysVerify);
+        WorkflowView view = engine.start("task", "/repo");
+
+        view = engine.requestRevisions(view.id(), "");
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.VALIDATION_APPROVAL);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+    }
+
+    @Test
+    void review_approved_shouldAdvanceToAcceptance() {
+        StageRunner runner = (stage, workflow, context) ->
+                stage == WorkflowStage.REVIEW
+                        ? StageOutcome.reviewed(stage, "ok", ReviewVerdict.APPROVED, List.of())
+                        : StageOutcome.success(stage, "ok");
+        WorkflowEngineImpl engine = engine(runner, alwaysVerify);
+        WorkflowView view = engine.start("task", "/repo");
+
+        view = engine.approve(view.id());
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+    }
+
+    @Test
+    void review_changesRequired_shouldReturnToImplementation() {
+        AtomicInteger reviewCalls = new AtomicInteger();
+        AtomicInteger implementationCalls = new AtomicInteger();
+        StageRunner runner = (stage, workflow, context) -> {
+            if (stage == WorkflowStage.IMPLEMENTATION) {
+                implementationCalls.incrementAndGet();
+            }
+            if (stage == WorkflowStage.REVIEW && reviewCalls.getAndIncrement() == 0) {
+                return StageOutcome.reviewed(stage, "needs corrections", ReviewVerdict.CHANGES_REQUIRED, List.of("fix x"));
+            }
+            return stage == WorkflowStage.REVIEW
+                    ? StageOutcome.reviewed(stage, "ok", ReviewVerdict.APPROVED, List.of())
+                    : StageOutcome.success(stage, "ok");
+        };
+        WorkflowEngineImpl engine = engine(runner, alwaysVerify);
+        WorkflowView view = engine.start("task", "/repo");
+
+        view = engine.approve(view.id());
+
+        assertThat(view.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
+        assertThat(view.status()).isEqualTo(WorkflowStatus.AWAITING_USER);
+        assertThat(implementationCalls.get()).isGreaterThanOrEqualTo(2);
+    }
+
+    @Test
+    void review_technicalFailure_shouldMarkFailed_notLoop() {
+        StageRunner runner = (stage, workflow, context) ->
+                stage == WorkflowStage.REVIEW
+                        ? StageOutcome.failure(stage, "reviewer crashed")
+                        : StageOutcome.success(stage, "ok");
+        WorkflowEngineImpl engine = engine(runner, alwaysVerify);
+        WorkflowView view = engine.start("task", "/repo");
+
+        view = engine.approve(view.id());
+
+        assertThat(view.status()).isEqualTo(WorkflowStatus.FAILED);
+    }
+
+    @Test
+    void review_malformedVerdict_shouldMarkFailed() {
+        StageRunner runner = (stage, workflow, context) ->
+                stage == WorkflowStage.REVIEW
+                        ? StageOutcome.success(stage, "ok")
+                        : StageOutcome.success(stage, "ok");
+        WorkflowEngineImpl engine = engine(runner, alwaysVerify);
+        WorkflowView view = engine.start("task", "/repo");
+
+        view = engine.approve(view.id());
+
+        assertThat(view.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(view.currentStage()).isNotEqualTo(WorkflowStage.ACCEPTANCE);
     }
 }

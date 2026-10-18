@@ -16,7 +16,7 @@ The end-to-end pi-flow workflow, step by step, with the actions of each particip
 | Validation & approval | Orchestrator + User | Approved, revisions requested, or rejected/cancelled |
 | Implementation | Developer | Code changes |
 | Automated verification | Orchestrator | Verification passed or failed |
-| Review | Reviewer (QA) | Review passed or corrections required |
+| Review | Reviewer (QA) | Structured verdict (`APPROVED` or `CHANGES_REQUIRED`) and findings extracted from the reviewer's JSON output |
 | Corrections | Orchestrator + Developer | Loop back until acceptable |
 | Completion | User + orchestrator | Accepted result, further work requested, or cancelled |
 
@@ -106,7 +106,7 @@ These states are conceptual only; how they are represented is intentionally not 
 
 ## Gate preconditions
 
-Gate commands (`flow-approve`, `flow-reject`, `flow-revise`, `flow-rework`) act only when the workflow is paused at the matching gate stage **and** its status is `AWAITING_USER`. The proposal gates are `VALIDATION_APPROVAL` (approve / reject / request revisions), and the acceptance gate is `ACCEPTANCE` (accept / request further work). A gate command issued at any other stage, or while the workflow is `IN_PROGRESS` or in a terminal status (`COMPLETED`, `CANCELLED`, `FAILED`), is rejected and leaves the workflow unchanged.
+Gate commands (`flow-approve`, `flow-reject`, `flow-revise`, `flow-rework`) act only when the workflow is paused at the matching gate stage **and** its status is `AWAITING_USER`. The proposal gates are `VALIDATION_APPROVAL` (approve / reject / request revisions), and the acceptance gate is `ACCEPTANCE` (accept / request further work). `flow-revise` and `flow-rework` accept an optional free-text feedback message (empty when omitted); that feedback is recorded on the workflow, threaded into the next `CHANGE_PROPOSAL` (after a revision request) or `IMPLEMENTATION` (after a further-work request) stage context, and cleared after that stage consumes it. A gate command issued at any other stage, or while the workflow is `IN_PROGRESS` or in a terminal status (`COMPLETED`, `CANCELLED`, `FAILED`), is rejected and leaves the workflow unchanged.
 
 ## Participant actions per step
 
@@ -137,8 +137,10 @@ Gate commands (`flow-approve`, `flow-reject`, `flow-revise`, `flow-rework`) act 
 7. **Review** — a loop that repeats on corrections:
    - *Orchestrator*: delegates the stage to the Reviewer with the task, approved artifacts, code changes, and verification results.
    - *Reviewer (QA)*: evaluates the implementation against them and returns findings.
-   - *Orchestrator*: records the review outcome.
-   - *If corrections are required*: the Developer applies corrections, then verification and review repeat; if the review passes, the workflow proceeds to final acceptance.
+   - *Orchestrator*: records the review outcome and routes on the extracted `ReviewVerdict` (`APPROVED` or `CHANGES_REQUIRED`), not on whether the reviewer process merely ran without crashing.
+   - *If the verdict is `CHANGES_REQUIRED`*: the Developer applies corrections, then verification and review repeat; if the verdict is `APPROVED`, the workflow proceeds to final acceptance.
+
+   **Reviewer output contract.** The reviewer's final text is treated as a single candidate JSON document, never scanned for a keyword substring. The orchestrator uses the content of the one ```` ```json ```` fenced block when exactly one is present, or the whole trimmed text when none is present; more than one ```` ```json ```` block is ambiguous. The candidate document must parse as a JSON object with `verdict` (a string, exactly `"APPROVED"` or `"CHANGES_REQUIRED"`) and `findings` (a JSON array of strings, which may be empty). Any deviation — invalid JSON, a non-object document, a missing or wrong-typed `verdict` or `findings`, or an ambiguous number of blocks — fails closed: the workflow is marked `FAILED`, never silently treated as `CHANGES_REQUIRED` or `APPROVED`.
 8. **Corrections**
    - *Orchestrator*: routes the workflow back into the verification/review loop.
    - *Developer*: applies corrections to the target repository.

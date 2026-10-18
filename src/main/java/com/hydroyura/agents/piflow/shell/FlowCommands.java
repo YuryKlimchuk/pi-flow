@@ -43,13 +43,15 @@ public class FlowCommands {
     }
 
     @Command(name = "flow-revise", description = "Request revisions to the proposal")
-    public String revise(@Argument(index = 0, description = "Workflow id") String id) {
-        return render(engine.requestRevisions(parse(id)));
+    public String revise(@Argument(index = 0, description = "Workflow id") String id,
+                         @Argument(index = 1, description = "Feedback message", defaultValue = "") String feedback) {
+        return render(engine.requestRevisions(parse(id), feedback));
     }
 
     @Command(name = "flow-rework", description = "Request further work after review")
-    public String rework(@Argument(index = 0, description = "Workflow id") String id) {
-        return render(engine.requestFurtherWork(parse(id)));
+    public String rework(@Argument(index = 0, description = "Workflow id") String id,
+                         @Argument(index = 1, description = "Feedback message", defaultValue = "") String feedback) {
+        return render(engine.requestFurtherWork(parse(id), feedback));
     }
 
     private WorkflowId parse(String id) {

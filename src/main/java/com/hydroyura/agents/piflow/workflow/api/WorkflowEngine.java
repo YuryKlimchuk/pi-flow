@@ -11,7 +11,7 @@ public interface WorkflowEngine {
 
     WorkflowView reject(WorkflowId id);
 
-    WorkflowView requestRevisions(WorkflowId id);
+    WorkflowView requestRevisions(WorkflowId id, String feedback);
 
-    WorkflowView requestFurtherWork(WorkflowId id);
+    WorkflowView requestFurtherWork(WorkflowId id, String feedback);
 }

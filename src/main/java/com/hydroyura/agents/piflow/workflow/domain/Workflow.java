@@ -23,6 +23,9 @@ public class Workflow {
     @Getter(AccessLevel.NONE)
     private final List<StageOutcome> outcomes = new ArrayList<>();
 
+    @Getter(AccessLevel.NONE)
+    private String pendingFeedback = "";
+
     public Workflow(WorkflowId id, String task, String targetRepo) {
         this.id = Objects.requireNonNull(id, "id must not be null");
         this.task = Objects.requireNonNull(task, "task must not be null");
@@ -37,6 +40,18 @@ public class Workflow {
 
     public void recordOutcome(StageOutcome outcome) {
         outcomes.add(Objects.requireNonNull(outcome, "outcome must not be null"));
+    }
+
+    /** Records user-supplied revision/further-work feedback for the next relevant stage run. */
+    public void recordPendingFeedback(String feedback) {
+        this.pendingFeedback = Objects.requireNonNull(feedback, "feedback must not be null");
+    }
+
+    /** Returns the pending feedback and clears it in one step; empty string means no feedback. */
+    public String consumePendingFeedback() {
+        String feedback = pendingFeedback;
+        pendingFeedback = "";
+        return feedback;
     }
 
     public void moveTo(WorkflowStage stage) {

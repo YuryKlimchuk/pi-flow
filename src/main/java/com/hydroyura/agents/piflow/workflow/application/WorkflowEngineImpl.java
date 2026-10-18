@@ -1,5 +1,6 @@
 package com.hydroyura.agents.piflow.workflow.application;
 
+import com.hydroyura.agents.piflow.workflow.api.ReviewVerdict;
 import com.hydroyura.agents.piflow.workflow.api.StageOutcome;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowEngine;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowId;
@@ -7,7 +8,9 @@ import com.hydroyura.agents.piflow.workflow.api.WorkflowStage;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStatus;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowView;
 import com.hydroyura.agents.piflow.workflow.domain.Workflow;
+import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 
 /** Hand-rolled enum state machine driving the pi-flow workflow synchronously. */
@@ -70,9 +73,10 @@ public class WorkflowEngineImpl implements WorkflowEngine {
     }
 
     @Override
-    public WorkflowView requestRevisions(WorkflowId id) {
+    public WorkflowView requestRevisions(WorkflowId id, String feedback) {
         Workflow workflow = require(id);
         workflow.requireAwaitingUserAt(WorkflowStage.VALIDATION_APPROVAL);
+        workflow.recordPendingFeedback(feedback);
         workflow.moveTo(WorkflowStage.CHANGE_PROPOSAL);
         workflow.markInProgress();
         advance(workflow);
@@ -81,9 +85,10 @@ public class WorkflowEngineImpl implements WorkflowEngine {
     }
 
     @Override
-    public WorkflowView requestFurtherWork(WorkflowId id) {
+    public WorkflowView requestFurtherWork(WorkflowId id, String feedback) {
         Workflow workflow = require(id);
         workflow.requireAwaitingUserAt(WorkflowStage.ACCEPTANCE);
+        workflow.recordPendingFeedback(feedback);
         workflow.moveTo(WorkflowStage.IMPLEMENTATION);
         workflow.markInProgress();
         advance(workflow);
@@ -105,10 +110,11 @@ public class WorkflowEngineImpl implements WorkflowEngine {
                     workflow.recordOutcome(StageOutcome.success(stage, ""));
                     workflow.moveTo(WorkflowStage.PROJECT_ANALYSIS);
                 }
-                case PROJECT_ANALYSIS, CHANGE_PROPOSAL, IMPLEMENTATION, REVIEW -> {
+                case PROJECT_ANALYSIS, CHANGE_PROPOSAL, IMPLEMENTATION -> {
+                    StageContext context = buildStageContext(workflow);
                     StageOutcome outcome;
                     try {
-                        outcome = stageRunner.run(stage, workflow);
+                        outcome = stageRunner.run(stage, workflow, context);
                     } catch (RuntimeException e) {
                         workflow.recordOutcome(StageOutcome.failure(stage, failureMessage(e)));
                         workflow.markFailed();
@@ -117,10 +123,33 @@ public class WorkflowEngineImpl implements WorkflowEngine {
                     workflow.recordOutcome(outcome);
                     if (outcome.success()) {
                         workflow.moveTo(next(stage));
-                    } else if (stage == WorkflowStage.REVIEW) {
-                        workflow.moveTo(WorkflowStage.IMPLEMENTATION); // corrections
                     } else {
                         workflow.markFailed();
+                    }
+                }
+                case REVIEW -> {
+                    StageContext context = buildStageContext(workflow);
+                    StageOutcome outcome;
+                    try {
+                        outcome = stageRunner.run(stage, workflow, context);
+                    } catch (RuntimeException e) {
+                        workflow.recordOutcome(StageOutcome.failure(stage, failureMessage(e)));
+                        workflow.markFailed();
+                        break;
+                    }
+                    if (outcome.success() && outcome.verdict().isEmpty()) {
+                        workflow.recordOutcome(StageOutcome.failure(stage,
+                                "REVIEW stage succeeded without a ReviewVerdict (invariant violation)"));
+                        workflow.markFailed();
+                        break;
+                    }
+                    workflow.recordOutcome(outcome);
+                    if (!outcome.success()) {
+                        workflow.markFailed();
+                    } else if (outcome.verdict().orElseThrow() == ReviewVerdict.APPROVED) {
+                        workflow.moveTo(WorkflowStage.ACCEPTANCE);
+                    } else {
+                        workflow.moveTo(WorkflowStage.IMPLEMENTATION);
                     }
                 }
                 case VALIDATION_APPROVAL, ACCEPTANCE -> workflow.markAwaitingUser();
@@ -133,8 +162,9 @@ public class WorkflowEngineImpl implements WorkflowEngine {
                         workflow.markFailed();
                         break;
                     }
-                    workflow.recordOutcome(new StageOutcome(stage, pass,
-                            pass ? "verification passed" : "verification failed"));
+                    workflow.recordOutcome(pass
+                            ? StageOutcome.success(stage, "verification passed")
+                            : StageOutcome.failure(stage, "verification failed"));
                     workflow.moveTo(pass ? WorkflowStage.REVIEW : WorkflowStage.IMPLEMENTATION);
                 }
                 case COMPLETED -> workflow.markCompleted();
@@ -143,12 +173,32 @@ public class WorkflowEngineImpl implements WorkflowEngine {
         }
     }
 
+    private StageContext buildStageContext(Workflow workflow) {
+        String feedback = workflow.consumePendingFeedback();
+        return new StageContext(
+                workflow.getTask(),
+                workflow.getTargetRepo(),
+                latestOutput(workflow, WorkflowStage.PROJECT_ANALYSIS),
+                latestOutput(workflow, WorkflowStage.CHANGE_PROPOSAL),
+                feedback.isBlank() ? Optional.empty() : Optional.of(feedback));
+    }
+
+    private static Optional<String> latestOutput(Workflow workflow, WorkflowStage stage) {
+        List<StageOutcome> outcomes = workflow.outcomes();
+        for (int i = outcomes.size() - 1; i >= 0; i--) {
+            StageOutcome outcome = outcomes.get(i);
+            if (outcome.stage() == stage) {
+                return Optional.of(outcome.output());
+            }
+        }
+        return Optional.empty();
+    }
+
     private WorkflowStage next(WorkflowStage stage) {
         return switch (stage) {
             case PROJECT_ANALYSIS -> WorkflowStage.CHANGE_PROPOSAL;
             case CHANGE_PROPOSAL -> WorkflowStage.VALIDATION_APPROVAL;
             case IMPLEMENTATION -> WorkflowStage.VERIFICATION;
-            case REVIEW -> WorkflowStage.ACCEPTANCE;
             default -> throw new IllegalStateException("No next stage after " + stage);
         };
     }
