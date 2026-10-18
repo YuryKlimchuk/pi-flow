@@ -104,6 +104,10 @@ The orchestrator records each stage's outcome and distinguishes three conceptual
 
 These states are conceptual only; how they are represented is intentionally not specified here.
 
+## Gate preconditions
+
+Gate commands (`flow-approve`, `flow-reject`, `flow-revise`, `flow-rework`) act only when the workflow is paused at the matching gate stage **and** its status is `AWAITING_USER`. The proposal gates are `VALIDATION_APPROVAL` (approve / reject / request revisions), and the acceptance gate is `ACCEPTANCE` (accept / request further work). A gate command issued at any other stage, or while the workflow is `IN_PROGRESS` or in a terminal status (`COMPLETED`, `CANCELLED`, `FAILED`), is rejected and leaves the workflow unchanged.
+
 ## Participant actions per step
 
 1. **Task setup**

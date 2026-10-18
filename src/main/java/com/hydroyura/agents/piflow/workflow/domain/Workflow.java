@@ -68,4 +68,18 @@ public class Workflow {
                 || status == WorkflowStatus.CANCELLED
                 || status == WorkflowStatus.FAILED;
     }
+
+    /**
+     * Asserts the workflow is paused at the given stage and awaiting a user decision.
+     *
+     * @throws IllegalStateException if the workflow is not at the expected stage or is not awaiting the user
+     */
+    public void requireAwaitingUserAt(WorkflowStage expectedStage) {
+        Objects.requireNonNull(expectedStage, "expectedStage must not be null");
+        if (currentStage != expectedStage || status != WorkflowStatus.AWAITING_USER) {
+            throw new IllegalStateException(
+                    "Expected workflow at stage " + expectedStage + " with status AWAITING_USER, but was at stage "
+                            + currentStage + " with status " + status);
+        }
+    }
 }

@@ -1,6 +1,8 @@
 package com.hydroyura.agents.piflow.workflow.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.hydroyura.agents.piflow.workflow.api.StageOutcome;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowId;
@@ -30,5 +32,35 @@ class WorkflowTest {
         assertThat(workflow.getCurrentStage()).isEqualTo(WorkflowStage.PROJECT_ANALYSIS);
         assertThat(workflow.getStatus()).isEqualTo(WorkflowStatus.AWAITING_USER);
         assertThat(workflow.isTerminal()).isFalse();
+    }
+
+    @Test
+    void requireAwaitingUserAt_shouldPassAtExpectedStageAndAwaitingUser() {
+        Workflow workflow = new Workflow(WorkflowId.generate(), "task", "/repo");
+        workflow.moveTo(WorkflowStage.VALIDATION_APPROVAL);
+        workflow.markAwaitingUser();
+
+        assertThatCode(() -> workflow.requireAwaitingUserAt(WorkflowStage.VALIDATION_APPROVAL))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void requireAwaitingUserAt_shouldRejectCorrectStageButInProgressStatus() {
+        Workflow workflow = new Workflow(WorkflowId.generate(), "task", "/repo");
+        workflow.moveTo(WorkflowStage.VALIDATION_APPROVAL);
+        workflow.markInProgress();
+
+        assertThatThrownBy(() -> workflow.requireAwaitingUserAt(WorkflowStage.VALIDATION_APPROVAL))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void requireAwaitingUserAt_shouldRejectCorrectStageButTerminalStatus() {
+        Workflow workflow = new Workflow(WorkflowId.generate(), "task", "/repo");
+        workflow.moveTo(WorkflowStage.VALIDATION_APPROVAL);
+        workflow.markCancelled();
+
+        assertThatThrownBy(() -> workflow.requireAwaitingUserAt(WorkflowStage.VALIDATION_APPROVAL))
+                .isInstanceOf(IllegalStateException.class);
     }
 }

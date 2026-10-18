@@ -1,11 +1,14 @@
 package com.hydroyura.agents.piflow.workflow.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.hydroyura.agents.piflow.workflow.api.StageOutcome;
+import com.hydroyura.agents.piflow.workflow.api.WorkflowId;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStage;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStatus;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowView;
+import com.hydroyura.agents.piflow.workflow.domain.Workflow;
 import com.hydroyura.agents.piflow.workflow.infrastructure.InMemoryWorkflowRepository;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
@@ -103,5 +106,137 @@ class WorkflowEngineImplTest {
 
         assertThat(loaded.currentStage()).isEqualTo(started.currentStage());
         assertThat(loaded.status()).isEqualTo(started.status());
+    }
+
+    @Test
+    void reject_thenApprove_shouldNotResurrectCancelledWorkflow() {
+        WorkflowEngineImpl engine = engine(alwaysPass, alwaysVerify);
+        WorkflowView view = engine.start("task", "/repo");
+        engine.reject(view.id());
+
+        assertThatThrownBy(() -> engine.approve(view.id()))
+                .isInstanceOf(IllegalStateException.class);
+
+        WorkflowView after = engine.status(view.id());
+        assertThat(after.status()).isEqualTo(WorkflowStatus.CANCELLED);
+        assertThat(after.currentStage()).isEqualTo(WorkflowStage.VALIDATION_APPROVAL);
+    }
+
+    @Test
+    void approve_whileInProgress_shouldBeRejected() {
+        Workflow workflow = new Workflow(WorkflowId.generate(), "task", "/repo");
+        workflow.moveTo(WorkflowStage.VALIDATION_APPROVAL);
+        workflow.markInProgress();
+        repository.save(workflow);
+
+        WorkflowEngineImpl engine = engine(alwaysPass, alwaysVerify);
+
+        assertThatThrownBy(() -> engine.approve(workflow.getId()))
+                .isInstanceOf(IllegalStateException.class);
+
+        WorkflowView after = engine.status(workflow.getId());
+        assertThat(after.currentStage()).isEqualTo(WorkflowStage.VALIDATION_APPROVAL);
+        assertThat(after.status()).isEqualTo(WorkflowStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void approve_onCompletedWorkflow_shouldBeRejected() {
+        WorkflowEngineImpl engine = engine(alwaysPass, alwaysVerify);
+        WorkflowView started = engine.start("task", "/repo");
+        WorkflowView accepted = engine.approve(started.id());
+        WorkflowView completed = engine.approve(accepted.id());
+
+        assertThat(completed.status()).isEqualTo(WorkflowStatus.COMPLETED);
+
+        assertThatThrownBy(() -> engine.approve(completed.id()))
+                .isInstanceOf(IllegalStateException.class);
+
+        WorkflowView after = engine.status(completed.id());
+        assertThat(after.status()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(after.currentStage()).isEqualTo(WorkflowStage.COMPLETED);
+    }
+
+    @Test
+    void reject_onCancelledWorkflow_shouldBeRejected() {
+        WorkflowEngineImpl engine = engine(alwaysPass, alwaysVerify);
+        WorkflowView started = engine.start("task", "/repo");
+        WorkflowView cancelled = engine.reject(started.id());
+
+        assertThatThrownBy(() -> engine.reject(cancelled.id()))
+                .isInstanceOf(IllegalStateException.class);
+
+        WorkflowView after = engine.status(cancelled.id());
+        assertThat(after.status()).isEqualTo(WorkflowStatus.CANCELLED);
+        assertThat(after.currentStage()).isEqualTo(WorkflowStage.VALIDATION_APPROVAL);
+    }
+
+    @Test
+    void requestFurtherWork_onFailedWorkflow_shouldBeRejected() {
+        Workflow workflow = new Workflow(WorkflowId.generate(), "task", "/repo");
+        workflow.moveTo(WorkflowStage.ACCEPTANCE);
+        workflow.markFailed();
+        repository.save(workflow);
+
+        WorkflowEngineImpl engine = engine(alwaysPass, alwaysVerify);
+
+        assertThatThrownBy(() -> engine.requestFurtherWork(workflow.getId()))
+                .isInstanceOf(IllegalStateException.class);
+
+        WorkflowView after = engine.status(workflow.getId());
+        assertThat(after.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(after.currentStage()).isEqualTo(WorkflowStage.ACCEPTANCE);
+    }
+
+    @Test
+    void stageRunnerException_shouldRecordFailureAndMarkFailed() {
+        StageRunner throwing = (stage, workflow) -> {
+            if (stage == WorkflowStage.IMPLEMENTATION) {
+                throw new RuntimeException("boom");
+            }
+            return StageOutcome.success(stage, "ok");
+        };
+        WorkflowEngineImpl engine = engine(throwing, alwaysVerify);
+        WorkflowView view = engine.start("task", "/repo");
+
+        view = engine.approve(view.id());
+
+        assertThat(view.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(view.outcomes()).anySatisfy(outcome -> {
+            assertThat(outcome.stage()).isEqualTo(WorkflowStage.IMPLEMENTATION);
+            assertThat(outcome.success()).isFalse();
+            assertThat(outcome.output()).contains("RuntimeException").contains("boom");
+        });
+    }
+
+    @Test
+    void verifierException_shouldRecordFailureAndMarkFailed() {
+        Verifier throwing = workflow -> {
+            throw new RuntimeException("verify boom");
+        };
+        WorkflowEngineImpl engine = engine(alwaysPass, throwing);
+        WorkflowView view = engine.start("task", "/repo");
+
+        view = engine.approve(view.id());
+
+        assertThat(view.status()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(view.outcomes()).anySatisfy(outcome -> {
+            assertThat(outcome.stage()).isEqualTo(WorkflowStage.VERIFICATION);
+            assertThat(outcome.success()).isFalse();
+            assertThat(outcome.output()).contains("RuntimeException").contains("verify boom");
+        });
+    }
+
+    @Test
+    void stageRunnerError_shouldPropagateUncaught() {
+        StageRunner errorThrowing = (stage, workflow) -> {
+            if (stage == WorkflowStage.PROJECT_ANALYSIS) {
+                throw new AssertionError("fatal");
+            }
+            return StageOutcome.success(stage, "ok");
+        };
+        WorkflowEngineImpl engine = engine(errorThrowing, alwaysVerify);
+
+        assertThatThrownBy(() -> engine.start("task", "/repo"))
+                .isInstanceOf(AssertionError.class);
     }
 }

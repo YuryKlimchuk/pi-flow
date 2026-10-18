@@ -44,11 +44,13 @@ public class WorkflowEngineImpl implements WorkflowEngine {
         Workflow workflow = require(id);
         switch (workflow.getCurrentStage()) {
             case VALIDATION_APPROVAL -> {
+                workflow.requireAwaitingUserAt(WorkflowStage.VALIDATION_APPROVAL);
                 workflow.moveTo(WorkflowStage.IMPLEMENTATION);
                 workflow.markInProgress();
                 advance(workflow);
             }
             case ACCEPTANCE -> {
+                workflow.requireAwaitingUserAt(WorkflowStage.ACCEPTANCE);
                 workflow.moveTo(WorkflowStage.COMPLETED);
                 workflow.markCompleted();
             }
@@ -61,9 +63,7 @@ public class WorkflowEngineImpl implements WorkflowEngine {
     @Override
     public WorkflowView reject(WorkflowId id) {
         Workflow workflow = require(id);
-        if (workflow.getCurrentStage() != WorkflowStage.VALIDATION_APPROVAL) {
-            throw new IllegalStateException("Reject is only allowed at the proposal gate");
-        }
+        workflow.requireAwaitingUserAt(WorkflowStage.VALIDATION_APPROVAL);
         workflow.markCancelled();
         repository.save(workflow);
         return view(workflow);
@@ -72,9 +72,7 @@ public class WorkflowEngineImpl implements WorkflowEngine {
     @Override
     public WorkflowView requestRevisions(WorkflowId id) {
         Workflow workflow = require(id);
-        if (workflow.getCurrentStage() != WorkflowStage.VALIDATION_APPROVAL) {
-            throw new IllegalStateException("Revisions are only allowed at the proposal gate");
-        }
+        workflow.requireAwaitingUserAt(WorkflowStage.VALIDATION_APPROVAL);
         workflow.moveTo(WorkflowStage.CHANGE_PROPOSAL);
         workflow.markInProgress();
         advance(workflow);
@@ -85,9 +83,7 @@ public class WorkflowEngineImpl implements WorkflowEngine {
     @Override
     public WorkflowView requestFurtherWork(WorkflowId id) {
         Workflow workflow = require(id);
-        if (workflow.getCurrentStage() != WorkflowStage.ACCEPTANCE) {
-            throw new IllegalStateException("Further work is only allowed at the acceptance gate");
-        }
+        workflow.requireAwaitingUserAt(WorkflowStage.ACCEPTANCE);
         workflow.moveTo(WorkflowStage.IMPLEMENTATION);
         workflow.markInProgress();
         advance(workflow);
@@ -110,7 +106,14 @@ public class WorkflowEngineImpl implements WorkflowEngine {
                     workflow.moveTo(WorkflowStage.PROJECT_ANALYSIS);
                 }
                 case PROJECT_ANALYSIS, CHANGE_PROPOSAL, IMPLEMENTATION, REVIEW -> {
-                    StageOutcome outcome = stageRunner.run(stage, workflow);
+                    StageOutcome outcome;
+                    try {
+                        outcome = stageRunner.run(stage, workflow);
+                    } catch (RuntimeException e) {
+                        workflow.recordOutcome(StageOutcome.failure(stage, failureMessage(e)));
+                        workflow.markFailed();
+                        break;
+                    }
                     workflow.recordOutcome(outcome);
                     if (outcome.success()) {
                         workflow.moveTo(next(stage));
@@ -122,7 +125,14 @@ public class WorkflowEngineImpl implements WorkflowEngine {
                 }
                 case VALIDATION_APPROVAL, ACCEPTANCE -> workflow.markAwaitingUser();
                 case VERIFICATION -> {
-                    boolean pass = verifier.verify(workflow);
+                    boolean pass;
+                    try {
+                        pass = verifier.verify(workflow);
+                    } catch (RuntimeException e) {
+                        workflow.recordOutcome(StageOutcome.failure(stage, failureMessage(e)));
+                        workflow.markFailed();
+                        break;
+                    }
                     workflow.recordOutcome(new StageOutcome(stage, pass,
                             pass ? "verification passed" : "verification failed"));
                     workflow.moveTo(pass ? WorkflowStage.REVIEW : WorkflowStage.IMPLEMENTATION);
@@ -141,6 +151,11 @@ public class WorkflowEngineImpl implements WorkflowEngine {
             case REVIEW -> WorkflowStage.ACCEPTANCE;
             default -> throw new IllegalStateException("No next stage after " + stage);
         };
+    }
+
+    private static String failureMessage(RuntimeException e) {
+        String message = e.getMessage();
+        return e.getClass().getSimpleName() + (message == null ? "" : ": " + message);
     }
 
     private Workflow require(WorkflowId id) {
