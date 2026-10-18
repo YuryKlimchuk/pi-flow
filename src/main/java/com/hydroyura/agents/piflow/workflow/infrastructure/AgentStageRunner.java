@@ -26,7 +26,7 @@ public class AgentStageRunner implements StageRunner {
         if (agent == null) {
             return StageOutcome.success(stage, "");
         }
-        PiRunResult result = piRunner.run(agent, promptFor(stage, workflow));
+        PiRunResult result = piRunner.run(agent, promptFor(stage, workflow), workflow.getTargetRepo());
         return new StageOutcome(stage, result.status() == PiRunStatus.SUCCESS, result.finalText());
     }
 

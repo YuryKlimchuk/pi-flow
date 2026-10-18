@@ -12,13 +12,10 @@ import com.hydroyura.agents.piflow.workflow.api.WorkflowStage;
 import com.hydroyura.agents.piflow.workflow.application.StageRunner;
 import com.hydroyura.agents.piflow.workflow.domain.Workflow;
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -27,39 +24,40 @@ class AgentStageRunnerTest {
     @TempDir
     static Path tempDir;
 
-    private static Path fakePi;
-
-    @BeforeAll
-    static void setUp() throws IOException {
-        String script;
-        try (InputStream in = AgentStageRunnerTest.class.getResourceAsStream("/fake-pi")) {
-            if (in == null) {
-                throw new IllegalStateException("fake-pi fixture missing from test resources");
-            }
-            script = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-        }
-        fakePi = tempDir.resolve("fake-pi");
-        Files.writeString(fakePi, script);
-        if (!fakePi.toFile().setExecutable(true)) {
-            throw new IllegalStateException("could not make fake-pi executable");
-        }
-    }
-
     @Test
-    void run_shouldInvokePiUnderRole() throws IOException {
+    void run_shouldInvokePiUnderRoleInTargetRepository() throws IOException {
         Path agentDir = tempDir.resolve("agents");
         Files.createDirectories(agentDir);
         Files.writeString(agentDir.resolve("analyst.md"), "---\nname: analyst\n---\nYou are an analyst.\n");
 
+        Path targetRepo = tempDir.resolve("target-repo");
+        Files.createDirectories(targetRepo);
+
         PiRunner piRunner = new JsonModePiRunner(
-                new PiProperties(fakePi.toString(), Duration.ofSeconds(10), null),
+                new PiProperties(cwdPi().toString(), Duration.ofSeconds(10), null),
                 new FileAgentResolver(List.of(agentDir)));
         StageRunner runner = new AgentStageRunner(piRunner);
 
-        Workflow workflow = new Workflow(WorkflowId.generate(), "task", "/repo");
+        Workflow workflow = new Workflow(WorkflowId.generate(), "task", targetRepo.toString());
         StageOutcome outcome = runner.run(WorkflowStage.PROJECT_ANALYSIS, workflow);
 
         assertThat(outcome.success()).isTrue();
-        assertThat(outcome.output()).isEqualTo("Hello world!");
+        assertThat(outcome.output()).isEqualTo("ok");
+        assertThat(Files.readString(targetRepo.resolve("cwd.txt")).trim())
+                .isEqualTo(targetRepo.toString());
+    }
+
+    private static Path cwdPi() throws IOException {
+        Path cwdPi = tempDir.resolve("fake-pi-cwd");
+        Files.writeString(cwdPi, """
+                #!/bin/sh
+                printf '%s\\n' "$PWD" > cwd.txt
+                printf '%s\\n' '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}'
+                printf '%s\\n' '{"type":"agent_settled","aborted":false}'
+                """);
+        if (!cwdPi.toFile().setExecutable(true)) {
+            throw new IllegalStateException("could not make fake-pi-cwd executable");
+        }
+        return cwdPi;
     }
 }

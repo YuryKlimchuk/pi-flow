@@ -34,9 +34,9 @@ flowchart TB
 ## Relationships
 
 - **User ↔ pi-flow** — the only human-facing interface. The user drives the workflow and holds approval authority at defined gates.
-- **pi-flow → Pi Coding Agent** — the orchestrator delegates each stage's work to a separate agent session under a distinct role, launching Pi in JSON mode (`pi --mode json`) and consuming its JSONL event stream to capture structured stage outcomes.
+- **pi-flow → Pi Coding Agent** — the orchestrator delegates each stage's work to a separate agent session under a distinct role, launching Pi in JSON mode (`pi --mode json`) inside the target repository, and consuming its JSONL event stream to capture structured stage outcomes.
 - **Pi Coding Agent → pi-flow** — each stage's results are returned to the orchestrator and explicitly passed to subsequent stages.
-- **Pi Coding Agent ↔ Target repository** — the agent reads and writes the project being worked on.
+- **Pi Coding Agent ↔ Target repository** — the agent reads and writes the project being worked on; the orchestrator sets the target repository as the agent's working directory.
 - **pi-flow ↔ Workflow state storage** — workflow state, stage outcomes, approval decisions, and failures are persisted locally; the artifacts themselves live in the target repository.
 
 ## Out of scope

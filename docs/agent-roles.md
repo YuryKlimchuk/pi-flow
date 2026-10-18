@@ -21,6 +21,26 @@ Agent definitions (instructions, tools, model) live in Pi as agent files under `
 | medium | Planning and review. |
 | expensive | Core implementation. |
 
+## How an agent is launched
+
+Pi has no native `--agent` or sub-agent flag: the role name only selects which agent file to load. pi-flow emulates a role by translating the agent file into Pi CLI flags and the process working directory.
+
+| Source | Effect |
+|---|---|
+| `model` (frontmatter) | `--model <model>` |
+| `tools` (frontmatter) | `--tools <tools>` |
+| body of the file | `--append-system-prompt <temp file>` |
+| always | `--mode json --no-session` |
+| workflow target repository | process working directory (`cwd`) |
+
+Concrete invocation:
+
+```
+pi --mode json --no-session --model <model> --tools <tools> --append-system-prompt <system.md> <prompt>
+```
+
+launched with the workflow's target repository as the working directory, so the agent reads and writes the project being worked on.
+
 ## Notes
 
 - Roles are roles of the same Pi Coding Agent, not separate services.

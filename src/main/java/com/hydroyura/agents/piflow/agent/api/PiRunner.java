@@ -5,5 +5,5 @@ public interface PiRunner {
 
     PiRunResult run(String prompt);
 
-    PiRunResult run(String agentName, String prompt);
+    PiRunResult run(String agentName, String prompt, String workingDirectory);
 }

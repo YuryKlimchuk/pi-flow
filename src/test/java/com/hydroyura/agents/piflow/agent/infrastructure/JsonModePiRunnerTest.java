@@ -121,7 +121,7 @@ class JsonModePiRunnerTest {
                 new PiProperties(agentPi.toString(), Duration.ofSeconds(10), null),
                 new FileAgentResolver(List.of(agentDir)));
 
-        PiRunResult result = runner.run("analyst", "hello");
+        PiRunResult result = runner.run("analyst", "hello", null);
 
         assertThat(result.status()).isEqualTo(PiRunStatus.SUCCESS);
         assertThat(result.finalText()).isEqualTo("ok");
@@ -136,9 +136,64 @@ class JsonModePiRunnerTest {
     void run_withUnknownAgent_shouldReturnFailure() {
         JsonModePiRunner runner = runner(fakePi);
 
-        PiRunResult result = runner.run("unknown-agent", "hello");
+        PiRunResult result = runner.run("unknown-agent", "hello", null);
 
         assertThat(result.status()).isEqualTo(PiRunStatus.FAILURE);
         assertThat(result.diagnostics()).contains("Unknown agent: unknown-agent");
+    }
+
+    @Test
+    void run_withWorkingDirectory_shouldLaunchPiInProvidedDirectory() throws IOException {
+        Path agentDir = tempDir.resolve("agents");
+        Files.createDirectories(agentDir);
+        Files.writeString(agentDir.resolve("analyst.md"), "---\nname: analyst\n---\nYou are an analyst.\n");
+
+        Path targetDir = tempDir.resolve("target-repo");
+        Files.createDirectories(targetDir);
+
+        JsonModePiRunner runner = new JsonModePiRunner(
+                new PiProperties(cwdEchoingPi().toString(), Duration.ofSeconds(10), null),
+                new FileAgentResolver(List.of(agentDir)));
+
+        PiRunResult result = runner.run("analyst", "hello", targetDir.toString());
+
+        assertThat(result.status()).isEqualTo(PiRunStatus.SUCCESS);
+        assertThat(result.diagnostics()).contains("CWD=" + targetDir);
+    }
+
+    @Test
+    void run_withWorkingDirectory_shouldPreferExplicitOverGlobalDefault() throws IOException {
+        Path agentDir = tempDir.resolve("agents");
+        Files.createDirectories(agentDir);
+        Files.writeString(agentDir.resolve("analyst.md"), "---\nname: analyst\n---\nYou are an analyst.\n");
+
+        Path globalDir = tempDir.resolve("global");
+        Files.createDirectories(globalDir);
+        Path explicitDir = tempDir.resolve("explicit");
+        Files.createDirectories(explicitDir);
+
+        JsonModePiRunner runner = new JsonModePiRunner(
+                new PiProperties(cwdEchoingPi().toString(), Duration.ofSeconds(10), globalDir.toString()),
+                new FileAgentResolver(List.of(agentDir)));
+
+        PiRunResult result = runner.run("analyst", "hello", explicitDir.toString());
+
+        assertThat(result.status()).isEqualTo(PiRunStatus.SUCCESS);
+        assertThat(result.diagnostics()).contains("CWD=" + explicitDir);
+        assertThat(result.diagnostics()).doesNotContain("CWD=" + globalDir);
+    }
+
+    private static Path cwdEchoingPi() throws IOException {
+        Path cwdPi = tempDir.resolve("fake-pi-cwd");
+        Files.writeString(cwdPi, """
+                #!/bin/sh
+                echo "CWD=$PWD" >&2
+                printf '%s\\n' '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}'
+                printf '%s\\n' '{"type":"agent_settled","aborted":false}'
+                """);
+        if (!cwdPi.toFile().setExecutable(true)) {
+            throw new IllegalStateException("could not make fake-pi-cwd executable");
+        }
+        return cwdPi;
     }
 }

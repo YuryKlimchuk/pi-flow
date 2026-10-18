@@ -38,11 +38,11 @@ public class JsonModePiRunner implements PiRunner {
     @Override
     public PiRunResult run(String prompt) {
         Objects.requireNonNull(prompt, "prompt must not be null");
-        return runCommand(List.of(properties.command(), "--mode", "json", "--no-session", prompt));
+        return runCommand(List.of(properties.command(), "--mode", "json", "--no-session", prompt), null);
     }
 
     @Override
-    public PiRunResult run(String agentName, String prompt) {
+    public PiRunResult run(String agentName, String prompt, String workingDirectory) {
         Objects.requireNonNull(agentName, "agentName must not be null");
         Objects.requireNonNull(prompt, "prompt must not be null");
 
@@ -75,7 +75,7 @@ public class JsonModePiRunner implements PiRunner {
                 command.add(tempPrompt.toString());
             }
             command.add(prompt);
-            return runCommand(command);
+            return runCommand(command, workingDirectory);
         } catch (IOException e) {
             log.warn("Failed to prepare agent system prompt", e);
             return new PiRunResult(PiRunStatus.FAILURE, "", "Failed to prepare agent system prompt: " + e.getMessage());
@@ -90,10 +90,13 @@ public class JsonModePiRunner implements PiRunner {
         }
     }
 
-    private PiRunResult runCommand(List<String> command) {
+    private PiRunResult runCommand(List<String> command, String workingDirectory) {
         ProcessBuilder processBuilder = new ProcessBuilder(command);
-        if (properties.workingDirectory() != null && !properties.workingDirectory().isBlank()) {
-            processBuilder.directory(Path.of(properties.workingDirectory()).toFile());
+        String cwd = (workingDirectory != null && !workingDirectory.isBlank())
+                ? workingDirectory
+                : properties.workingDirectory();
+        if (cwd != null && !cwd.isBlank()) {
+            processBuilder.directory(Path.of(cwd).toFile());
         }
         log.info("Starting Pi run: command={}, cwd={}, timeout={}",
                 command, processBuilder.directory(), properties.timeout());

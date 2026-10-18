@@ -62,3 +62,14 @@ When an agent is selected, the runner SHALL pass the agent's model, tools, and s
 #### Scenario: system prompt appended
 - **WHEN** the agent has a non-empty system prompt
 - **THEN** the runner appends it to Pi's system prompt
+
+### Requirement: Run in a specified working directory
+The runner SHALL accept an optional working directory per run and launch the Pi process in that directory when one is provided.
+
+#### Scenario: working directory provided
+- **WHEN** the runner is invoked with a working directory
+- **THEN** the Pi process is launched with that directory as its working directory
+
+#### Scenario: no working directory provided
+- **WHEN** the runner is invoked without a working directory
+- **THEN** the Pi process is launched with the configured default working directory, or the process's own directory if none is configured
