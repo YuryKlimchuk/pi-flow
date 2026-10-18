@@ -3,6 +3,8 @@ spring:
     name: pi-flow
 
 pi-flow:
+  agent:
+    timeout: 10m
   agents:
     tiers:
       cheap: deepseek/deepseek-v4-pro

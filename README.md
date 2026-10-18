@@ -10,6 +10,7 @@ The base architecture is captured in:
 
 - [`docs/system-overview.md`](docs/system-overview.md) — system participants and their relationships.
 - [`docs/workflow.md`](docs/workflow.md) — workflow, stage outcomes, and open questions.
+- [`docs/howto.md`](docs/howto.md) — how to build, run, and verify the orchestrator.
 
 These are the reference for implementation; the workflow and its stages are provisional and may change.
 
