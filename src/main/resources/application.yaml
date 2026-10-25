@@ -21,3 +21,9 @@ workspace:
   base-directory: ${WORKSPACE_BASE_DIRECTORY:${user.home}/.pi-flow/workspaces}
   lock-directory: ${WORKSPACE_LOCK_DIRECTORY:${user.home}/.pi-flow/locks}
   lease-duration: ${WORKSPACE_LEASE_DURATION:5m}
+
+workflow:
+  temporal:
+    endpoint: ${WORKFLOW_TEMPORAL_ENDPOINT:localhost:7233}
+    namespace: ${WORKFLOW_TEMPORAL_NAMESPACE:default}
+    task-queue: ${WORKFLOW_TEMPORAL_TASK_QUEUE:pi-flow}

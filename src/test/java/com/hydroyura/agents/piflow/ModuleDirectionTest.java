@@ -106,4 +106,15 @@ class ModuleDirectionTest {
 				.should().dependOnClassesThat().resideInAPackage("org.springframework.web.client..")
 				.check(classes);
 	}
+
+	@Test
+	void workflowDoesNotDependOnSiblingInfrastructure() {
+		noClasses()
+				.that().resideInAPackage("com.hydroyura.agents.piflow.workflow..")
+				.should().dependOnClassesThat().resideInAnyPackage(
+						WORKSPACE_INFRASTRUCTURE,
+						AGENT_INFRASTRUCTURE,
+						GITHUB_INFRASTRUCTURE)
+				.check(classes);
+	}
 }
