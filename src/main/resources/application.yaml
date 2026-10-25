@@ -16,3 +16,8 @@ agent:
   allowed-environment-variables: []
   default-timeout: ${AGENT_DEFAULT_TIMEOUT:10m}
   profiles: {}
+
+workspace:
+  base-directory: ${WORKSPACE_BASE_DIRECTORY:${user.home}/.pi-flow/workspaces}
+  lock-directory: ${WORKSPACE_LOCK_DIRECTORY:${user.home}/.pi-flow/locks}
+  lease-duration: ${WORKSPACE_LEASE_DURATION:5m}

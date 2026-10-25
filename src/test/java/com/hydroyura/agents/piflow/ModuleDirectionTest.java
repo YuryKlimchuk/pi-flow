@@ -16,6 +16,8 @@ class ModuleDirectionTest {
 	private static final String GITHUB_INFRASTRUCTURE = "com.hydroyura.agents.piflow.github.infrastructure..";
 	private static final String AGENT = "com.hydroyura.agents.piflow.agent..";
 	private static final String AGENT_INFRASTRUCTURE = "com.hydroyura.agents.piflow.agent.infrastructure..";
+	private static final String WORKSPACE = "com.hydroyura.agents.piflow.workspace..";
+	private static final String WORKSPACE_INFRASTRUCTURE = "com.hydroyura.agents.piflow.workspace.infrastructure..";
 
 	private final JavaClasses classes = new ClassFileImporter().importPackages("com.hydroyura.agents.piflow");
 
@@ -58,6 +60,27 @@ class ModuleDirectionTest {
 				.should().dependOnClassesThat().resideInAnyPackage(
 						"com.hydroyura.agents.piflow.workflow..",
 						"com.hydroyura.agents.piflow.workspace..",
+						"com.hydroyura.agents.piflow.github..",
+						"com.hydroyura.agents.piflow.interaction..",
+						"com.hydroyura.agents.piflow.web..")
+				.check(classes);
+	}
+
+	@Test
+	void workspaceInfrastructureIsNotLeakedToOtherModules() {
+		noClasses()
+				.that().resideOutsideOfPackage(WORKSPACE)
+				.should().dependOnClassesThat().resideInAPackage(WORKSPACE_INFRASTRUCTURE)
+				.check(classes);
+	}
+
+	@Test
+	void workspaceIsLeafModule() {
+		noClasses()
+				.that().resideInAPackage(WORKSPACE)
+				.should().dependOnClassesThat().resideInAnyPackage(
+						"com.hydroyura.agents.piflow.workflow..",
+						"com.hydroyura.agents.piflow.agent..",
 						"com.hydroyura.agents.piflow.github..",
 						"com.hydroyura.agents.piflow.interaction..",
 						"com.hydroyura.agents.piflow.web..")
