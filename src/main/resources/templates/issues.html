@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Issues')}"></head>
+<body class="bg-light">
+<header th:replace="~{fragments :: header}"></header>
+<main class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="mb-0">Issues — <span th:text="${owner}"></span>/<span th:text="${repository}"></span></h2>
+        <a class="btn btn-outline-secondary btn-sm" th:href="@{/repositories}">← К репозиториям</a>
+    </div>
+
+    <div th:if="${error != null}" class="alert alert-danger" role="alert">
+        <p th:text="${error}" class="mb-2"></p>
+        <a th:if="${retryable}" class="btn btn-outline-danger btn-sm"
+           th:href="@{/repositories/{owner}/{repo}/issues(owner=${owner}, repo=${repository}, page=${page}, perPage=${perPage})}">Повторить</a>
+    </div>
+
+    <div th:if="${error == null && issues.isEmpty()}" class="alert alert-secondary">
+        В этом репозитории нет Issues.
+    </div>
+
+    <div th:if="${error == null && !issues.isEmpty()}" class="table-responsive">
+        <table class="table table-hover bg-white border rounded">
+            <thead class="table-light">
+            <tr><th>#</th><th>Заголовок</th><th>Состояние</th><th class="text-end">Действия</th></tr>
+            </thead>
+            <tbody>
+            <tr th:each="issue : ${issues}">
+                <td th:text="${issue.number}"></td>
+                <td th:text="${issue.title}"></td>
+                <td>
+                    <span class="badge rounded-pill"
+                          th:classappend="${issue.open} ? 'text-bg-success' : 'text-bg-secondary'"
+                          th:text="${issue.stateLabel}"></span>
+                </td>
+                <td class="text-end">
+                    <a class="btn btn-sm btn-outline-secondary" th:href="${issue.url}" target="_blank"
+                       rel="noopener">Открыть</a>
+                    <span tabindex="0" data-bs-toggle="tooltip"
+                          title="Будет доступно после реализации Workflow">
+                        <button type="button" class="btn btn-sm btn-primary" disabled>Взять в работу</button>
+                    </span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <nav th:if="${error == null && !issues.isEmpty()}" aria-label="Пагинация">
+        <ul class="pagination">
+            <li class="page-item" th:if="${hasPrevious}">
+                <a class="page-link"
+                   th:href="@{/repositories/{owner}/{repo}/issues(owner=${owner}, repo=${repository}, page=${page - 1}, perPage=${perPage})}">← Назад</a>
+            </li>
+            <li class="page-item disabled"><span class="page-link" th:text="${'Страница ' + page}"></span></li>
+            <li class="page-item" th:if="${hasNext}">
+                <a class="page-link"
+                   th:href="@{/repositories/{owner}/{repo}/issues(owner=${owner}, repo=${repository}, page=${page + 1}, perPage=${perPage})}">Вперёд →</a>
+            </li>
+        </ul>
+    </nav>
+</main>
+<script th:replace="~{fragments :: scripts}"></script>
+<script>
+    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
+        new bootstrap.Tooltip(el);
+    });
+</script>
+</body>
+</html>

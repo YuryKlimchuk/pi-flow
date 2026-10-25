@@ -18,6 +18,7 @@ class ModuleDirectionTest {
 	private static final String AGENT_INFRASTRUCTURE = "com.hydroyura.agents.piflow.agent.infrastructure..";
 	private static final String WORKSPACE = "com.hydroyura.agents.piflow.workspace..";
 	private static final String WORKSPACE_INFRASTRUCTURE = "com.hydroyura.agents.piflow.workspace.infrastructure..";
+	private static final String WEB = "com.hydroyura.agents.piflow.web..";
 
 	private final JavaClasses classes = new ClassFileImporter().importPackages("com.hydroyura.agents.piflow");
 
@@ -84,6 +85,25 @@ class ModuleDirectionTest {
 						"com.hydroyura.agents.piflow.github..",
 						"com.hydroyura.agents.piflow.interaction..",
 						"com.hydroyura.agents.piflow.web..")
+				.check(classes);
+	}
+
+	@Test
+	void webDoesNotDependOnWorkspaceOrAgent() {
+		noClasses()
+				.that().resideInAPackage(WEB)
+				.should().dependOnClassesThat().resideInAnyPackage(
+						WORKSPACE,
+						AGENT,
+						"com.hydroyura.agents.piflow.interaction..")
+				.check(classes);
+	}
+
+	@Test
+	void webDoesNotUseRestClient() {
+		noClasses()
+				.that().resideInAPackage(WEB)
+				.should().dependOnClassesThat().resideInAPackage("org.springframework.web.client..")
 				.check(classes);
 	}
 }

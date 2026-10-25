@@ -1,11 +1,15 @@
 <!DOCTYPE html>
 <html lang="ru" xmlns:th="http://www.thymeleaf.org">
-<head>
-    <meta charset="UTF-8">
-    <title>pi-flow</title>
-</head>
-<body>
-    <h1>Добро пожаловать в pi-flow</h1>
-    <p>Локальный оркестратор AI-агентов для автоматизации разработки ПО.</p>
+<head th:replace="~{fragments :: head('pi-flow')}"></head>
+<body class="bg-light">
+<header th:replace="~{fragments :: header}"></header>
+<main class="container py-4">
+    <div class="p-5 mb-4 bg-white border rounded-3">
+        <h2 class="mb-3">Добро пожаловать в pi-flow</h2>
+        <p class="text-muted">Локальный оркестратор AI-агентов для автоматизации разработки ПО.</p>
+        <a class="btn btn-primary" th:href="@{/repositories}">Просмотреть репозитории GitHub</a>
+    </div>
+</main>
+<script th:replace="~{fragments :: scripts}"></script>
 </body>
 </html>

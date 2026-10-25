@@ -1,0 +1,8 @@
+body {
+    overflow-wrap: break-word;
+}
+
+.table td,
+.table th {
+    vertical-align: middle;
+}

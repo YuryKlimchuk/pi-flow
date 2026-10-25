@@ -30,6 +30,7 @@ import com.hydroyura.agents.piflow.agent.domain.AgentProcessRequest;
 import com.hydroyura.agents.piflow.agent.domain.AgentProcessResult;
 import com.hydroyura.agents.piflow.agent.domain.AgentProcessRunner;
 import com.hydroyura.agents.piflow.agent.domain.AgentProcessStatus;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -48,8 +49,9 @@ public class ProcessAgentRunner implements AgentProcessRunner {
 	private final Set<String> cancelledRuns = ConcurrentHashMap.newKeySet();
 	private final ExecutorService ioExecutor = Executors.newCachedThreadPool(daemonThreadFactory());
 
+	@Autowired
 	public ProcessAgentRunner(AgentProperties properties) {
-		this(properties, name -> System.getenv(name));
+		this(properties, System::getenv);
 	}
 
 	ProcessAgentRunner(AgentProperties properties, UnaryOperator<String> envLookup) {

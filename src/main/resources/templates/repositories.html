@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Репозитории')}"></head>
+<body class="bg-light">
+<header th:replace="~{fragments :: header}"></header>
+<main class="container py-4">
+    <h2 class="mb-3">Репозитории</h2>
+
+    <div th:if="${error != null}" class="alert alert-danger" role="alert">
+        <p th:text="${error}" class="mb-2"></p>
+        <a th:if="${retryable}" class="btn btn-outline-danger btn-sm"
+           th:href="@{/repositories(page=${page}, perPage=${perPage})}">Повторить</a>
+    </div>
+
+    <div th:if="${error == null && repositories.isEmpty()}" class="alert alert-secondary">
+        Нет доступных репозиториев.
+    </div>
+
+    <div th:if="${error == null && !repositories.isEmpty()}" class="table-responsive">
+        <table class="table table-hover bg-white border rounded">
+            <thead class="table-light">
+            <tr><th>Владелец</th><th>Имя</th><th class="text-end">Действия</th></tr>
+            </thead>
+            <tbody>
+            <tr th:each="repo : ${repositories}">
+                <td th:text="${repo.owner}"></td>
+                <td th:text="${repo.name}"></td>
+                <td class="text-end">
+                    <a class="btn btn-sm btn-outline-primary"
+                       th:href="@{/repositories/{owner}/{repo}/issues(owner=${repo.owner}, repo=${repo.name})}">Issues</a>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <nav th:if="${error == null && !repositories.isEmpty()}" aria-label="Пагинация">
+        <ul class="pagination">
+            <li class="page-item" th:if="${hasPrevious}">
+                <a class="page-link" th:href="@{/repositories(page=${page - 1}, perPage=${perPage})}">← Назад</a>
+            </li>
+            <li class="page-item disabled"><span class="page-link" th:text="${'Страница ' + page}"></span></li>
+            <li class="page-item" th:if="${hasNext}">
+                <a class="page-link" th:href="@{/repositories(page=${page + 1}, perPage=${perPage})}">Вперёд →</a>
+            </li>
+        </ul>
+    </nav>
+</main>
+<script th:replace="~{fragments :: scripts}"></script>
+</body>
+</html>

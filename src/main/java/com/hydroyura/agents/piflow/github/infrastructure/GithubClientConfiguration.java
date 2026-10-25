@@ -7,20 +7,17 @@ import org.springframework.web.client.RestClient;
 
 /**
  * Собирает {@link RestClient} для GitHub API из typed-конфигурации.
- *
- * <p>Использует автоконфигурируемый Spring Boot {@link RestClient.Builder},
- * чтобы к клиенту применялись стандартные конвертеры сообщений (включая JSON).</p>
  */
 @Configuration
 public class GithubClientConfiguration {
 
 	@Bean
-	RestClient githubRestClient(RestClient.Builder builder, GithubApiProperties properties) {
+	RestClient githubRestClient(GithubApiProperties properties) {
 		SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
 		factory.setConnectTimeout(properties.connectTimeout());
 		factory.setReadTimeout(properties.readTimeout());
 
-		return builder
+		return RestClient.builder()
 				.baseUrl(properties.baseUrl())
 				.requestFactory(factory)
 				.build();
