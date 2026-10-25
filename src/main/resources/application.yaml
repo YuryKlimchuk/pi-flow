@@ -9,3 +9,10 @@ github:
     default-page-size: 30
     connect-timeout: ${GITHUB_API_CONNECT_TIMEOUT:5s}
     read-timeout: ${GITHUB_API_READ_TIMEOUT:30s}
+
+agent:
+  executable: ${AGENT_EXECUTABLE:pi}
+  base-args: []
+  allowed-environment-variables: []
+  default-timeout: ${AGENT_DEFAULT_TIMEOUT:10m}
+  profiles: {}
