@@ -36,10 +36,12 @@
                 <td class="text-end">
                     <a class="btn btn-sm btn-outline-secondary" th:href="${issue.url}" target="_blank"
                        rel="noopener">Открыть</a>
-                    <span tabindex="0" data-bs-toggle="tooltip"
-                          title="Будет доступно после реализации Workflow">
-                        <button type="button" class="btn btn-sm btn-primary" disabled>Взять в работу</button>
-                    </span>
+                    <form th:action="@{/workflows/start}" method="post" class="d-inline">
+                        <input type="hidden" name="owner" th:value="${owner}">
+                        <input type="hidden" name="repository" th:value="${repository}">
+                        <input type="hidden" name="issueNumber" th:value="${issue.number}">
+                        <button type="submit" class="btn btn-sm btn-primary">Взять в работу</button>
+                    </form>
                 </td>
             </tr>
             </tbody>

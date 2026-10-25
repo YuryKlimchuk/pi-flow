@@ -42,7 +42,12 @@ public class TemporalWorkflowAdapter implements WorkflowExecutionPort {
 		try {
 			PiFlowWorkflow workflow = workflowClient.newWorkflowStub(PiFlowWorkflow.class, options);
 			WorkflowStub stub = WorkflowStub.fromTyped(workflow);
-			stub.start(new WorkflowInput(command.workflowId(), command.repositoryUrl(), command.issueNumber()));
+			stub.start(new WorkflowInput(
+					command.workflowId(),
+					command.repositoryUrl(),
+					command.owner(),
+					command.repository(),
+					command.issueNumber()));
 			return new WorkflowExecutionResult(command.workflowId());
 		} catch (io.temporal.client.WorkflowException e) {
 			throw WorkflowException.execution("temporal execution failed to start: " + e.getMessage(), e);

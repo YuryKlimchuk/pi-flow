@@ -4,11 +4,15 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
+import com.tngtech.archunit.core.importer.ImportOption;
 import org.junit.jupiter.api.Test;
 
 /**
  * Проверяет направление зависимостей между модулями и изоляцию инфраструктуры
  * модуля github.
+ *
+ * <p>Правила применяются только к production-коду (test-классы исключены), так
+ * как кросс-модульные интеграционные тесты легитимно связывают инфраструктуру.</p>
  */
 class ModuleDirectionTest {
 
@@ -20,7 +24,9 @@ class ModuleDirectionTest {
 	private static final String WORKSPACE_INFRASTRUCTURE = "com.hydroyura.agents.piflow.workspace.infrastructure..";
 	private static final String WEB = "com.hydroyura.agents.piflow.web..";
 
-	private final JavaClasses classes = new ClassFileImporter().importPackages("com.hydroyura.agents.piflow");
+	private final JavaClasses classes = new ClassFileImporter()
+			.withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
+			.importPackages("com.hydroyura.agents.piflow");
 
 	@Test
 	void githubInfrastructureIsNotLeakedToOtherModules() {

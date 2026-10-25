@@ -5,10 +5,11 @@ import io.temporal.workflow.Workflow;
 import java.time.Duration;
 
 /**
- * Реализация Temporal workflow минимального запуска Workflow.
+ * Реализация Temporal workflow минимального сценария: подготовка workspace
+ * выполняется в activity до завершения исполнения.
  *
- * <p>Вызывает activity подготовки и возвращает её результат. Полная оркестрация
- * этапов бизнес-процесса находится за пределами текущего изменения.</p>
+ * <p>Запуск Pi-агента и дальнейшие стадии процесса находятся за пределами
+ * текущего изменения.</p>
  */
 public class PiFlowWorkflowImpl implements PiFlowWorkflow {
 
@@ -20,6 +21,7 @@ public class PiFlowWorkflowImpl implements PiFlowWorkflow {
 
 	@Override
 	public String execute(WorkflowInput input) {
-		return activities.prepare(input.workflowId(), input.repositoryUrl(), input.issueNumber());
+		WorkflowPreparationResult result = activities.prepare(input);
+		return result.branch() == null ? "prepared:" + input.workflowId() : result.branch();
 	}
 }

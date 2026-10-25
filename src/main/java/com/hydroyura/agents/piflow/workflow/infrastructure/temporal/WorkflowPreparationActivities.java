@@ -4,11 +4,17 @@ import io.temporal.activity.ActivityInterface;
 import io.temporal.activity.ActivityMethod;
 
 /**
- * Контракт activity минимального запуска Workflow.
+ * Контракт activity подготовки workspace внутри Temporal execution.
  */
 @ActivityInterface
 public interface WorkflowPreparationActivities {
 
+	/**
+	 * Подготавливает локальную копию репозитория и рабочую ветку.
+	 *
+	 * @param input входные данные исполнения
+	 * @return результат подготовки
+	 */
 	@ActivityMethod
-	String prepare(String workflowId, String repositoryUrl, long issueNumber);
+	WorkflowPreparationResult prepare(WorkflowInput input);
 }

@@ -31,7 +31,7 @@ class TemporalWorkflowAdapterTest {
 				.thenThrow(new RuntimeException("connection refused"));
 
 		WorkflowException error = catchThrowableOfType(
-				() -> adapter.start(new WorkflowExecutionCommand("wf-1", "https://github.com/o/r", 42)),
+				() -> adapter.start(new WorkflowExecutionCommand("wf-1", "https://github.com/acme/demo.git", "acme", "demo", 42)),
 				WorkflowException.class);
 
 		assertThat(error.errorType()).isEqualTo(WorkflowException.ErrorType.EXECUTION);

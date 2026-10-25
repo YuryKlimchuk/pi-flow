@@ -1,5 +1,6 @@
 package com.hydroyura.agents.piflow.workflow.infrastructure;
 
+import com.hydroyura.agents.piflow.workspace.api.WorkspaceOperations;
 import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.PiFlowWorkflowImpl;
 import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.WorkflowPreparationActivitiesImpl;
 
@@ -37,11 +38,11 @@ public class TemporalConfiguration {
 	}
 
 	@Bean
-	WorkerFactory workerFactory(WorkflowClient workflowClient, TemporalProperties properties) {
+	WorkerFactory workerFactory(WorkflowClient workflowClient, TemporalProperties properties, WorkspaceOperations workspaceOperations) {
 		WorkerFactory factory = WorkerFactory.newInstance(workflowClient);
 		Worker worker = factory.newWorker(properties.taskQueue());
 		worker.registerWorkflowImplementationTypes(PiFlowWorkflowImpl.class);
-		worker.registerActivitiesImplementations(new WorkflowPreparationActivitiesImpl());
+		worker.registerActivitiesImplementations(new WorkflowPreparationActivitiesImpl(workspaceOperations));
 		factory.start();
 		return factory;
 	}

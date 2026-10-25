@@ -5,6 +5,7 @@ import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
@@ -20,13 +21,17 @@ import com.hydroyura.agents.piflow.github.api.PageRequest;
 import com.hydroyura.agents.piflow.github.api.RepositoryOperations;
 import com.hydroyura.agents.piflow.github.api.RepositoryPage;
 import com.hydroyura.agents.piflow.github.api.RepositorySummary;
+import com.hydroyura.agents.piflow.workflow.api.WorkflowOperations;
+import com.hydroyura.agents.piflow.workflow.api.WorkflowStage;
+import com.hydroyura.agents.piflow.workflow.api.WorkflowState;
+import com.hydroyura.agents.piflow.workflow.api.WorkflowStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-@WebMvcTest(controllers = {RepositoryController.class, IssueController.class, WelcomeController.class})
+@WebMvcTest(controllers = {RepositoryController.class, IssueController.class, WelcomeController.class, WorkflowController.class})
 class WebPagesMvcTest {
 
 	private static final String SENTINEL_PAT = "SENTINEL_PAT_12345";
@@ -39,6 +44,9 @@ class WebPagesMvcTest {
 
 	@MockitoBean
 	private IssueOperations issueOperations;
+
+	@MockitoBean
+	private WorkflowOperations workflowOperations;
 
 	@Test
 	void welcomePage_shouldRenderIndex() throws Exception {
@@ -141,5 +149,35 @@ class WebPagesMvcTest {
 				.andExpect(status().isOk())
 				.andExpect(content().string(containsString("подключиться к GitHub")))
 				.andExpect(content().string(not(containsString(SENTINEL_PAT))));
+	}
+
+	@Test
+	void issuesPage_shouldRenderStartWorkflowForm() throws Exception {
+		IssuePage page = new IssuePage(
+				List.of(new IssueSummary(7L, "Bug", IssueState.OPEN, "alice", "https://github.com/acme/repo/issues/7",
+						false)),
+				1, 30, false);
+		when(issueOperations.listIssues(any(), any(), any(), any())).thenReturn(page);
+
+		mockMvc.perform(get("/repositories/acme/repo/issues"))
+				.andExpect(status().isOk())
+				.andExpect(content().string(containsString("/workflows/start")))
+				.andExpect(content().string(containsString("Взять в работу")));
+	}
+
+	@Test
+	void workflowStart_shouldRenderResultState() throws Exception {
+		when(workflowOperations.start(any())).thenReturn(new WorkflowState(
+				"wf-1", "https://github.com/acme/demo.git", 42, WorkflowStatus.CREATED,
+				WorkflowStage.ANALYZING_REQUIREMENTS, List.of(), "exec-1"));
+
+		mockMvc.perform(post("/workflows/start")
+					.param("owner", "acme")
+					.param("repository", "demo")
+					.param("issueNumber", "42"))
+				.andExpect(status().isOk())
+				.andExpect(view().name("workflow-start"))
+				.andExpect(content().string(containsString("wf-1")))
+				.andExpect(content().string(containsString("exec-1")));
 	}
 }

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Запуск Workflow')}"></head>
+<body class="bg-light">
+<header th:replace="~{fragments :: header}"></header>
+<main class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="mb-0">Запуск Workflow</h2>
+        <a class="btn btn-outline-secondary btn-sm"
+           th:href="@{/repositories/{owner}/{repo}/issues(owner=${owner}, repo=${repository})}">← К Issues</a>
+    </div>
+
+    <div th:if="${error != null}" class="alert alert-danger" role="alert">
+        <p th:text="${error}" class="mb-0"></p>
+        <p class="mb-0 mt-2 text-muted">
+            Задача: <span th:text="${issueNumber}"></span> —
+            <span th:text="${owner}"></span>/<span th:text="${repository}"></span>
+        </p>
+    </div>
+
+    <div th:if="${state != null}" class="card border-success">
+        <div class="card-body">
+            <h5 class="card-title text-success">Workflow запущен</h5>
+            <dl class="row mb-0">
+                <dt class="col-sm-3">Workflow ID</dt>
+                <dd class="col-sm-9" th:text="${state.workflowId}"></dd>
+                <dt class="col-sm-3">Репозиторий</dt>
+                <dd class="col-sm-9" th:text="${state.repositoryUrl}"></dd>
+                <dt class="col-sm-3">Issue</dt>
+                <dd class="col-sm-9" th:text="${state.issueNumber}"></dd>
+                <dt class="col-sm-3">Статус</dt>
+                <dd class="col-sm-9" th:text="${state.status}"></dd>
+                <dt class="col-sm-3">Этап</dt>
+                <dd class="col-sm-9" th:text="${state.currentStage}"></dd>
+                <dt class="col-sm-3">Execution ID</dt>
+                <dd class="col-sm-9" th:text="${state.executionId}"></dd>
+            </dl>
+        </div>
+    </div>
+</main>
+<script th:replace="~{fragments :: scripts}"></script>
+</body>
+</html>
