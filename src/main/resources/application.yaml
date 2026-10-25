@@ -1,20 +1,3 @@
 spring:
   application:
     name: pi-flow
-
-pi-flow:
-  agent:
-    timeout: 10m
-  agents:
-    tiers:
-      cheap: deepseek/deepseek-v4-pro
-      medium: deepseek/deepseek-v4-pro
-      expensive: deepseek/deepseek-v4-pro
-    roles:
-      analyst: cheap
-      architect: medium
-      developer: expensive
-      reviewer: medium
-#  retry:
-#    max-technical-retries: 3
-#    max-content-corrections: 5
