@@ -15,6 +15,7 @@ import java.util.Map;
  * @param workingDirectory рабочая директория
  * @param parameters параметры запуска
  * @param timeout ограничение времени; {@code null} — использовать default адаптера
+ * @param feedback необязательные замечания пользователя
  */
 public record AgentProcessRequest(
 		String runId,
@@ -24,7 +25,8 @@ public record AgentProcessRequest(
 		String context,
 		Path workingDirectory,
 		Map<String, String> parameters,
-		Duration timeout) {
+		Duration timeout,
+		String feedback) {
 
 	public AgentProcessRequest {
 		parameters = parameters == null ? Map.of() : Map.copyOf(parameters);

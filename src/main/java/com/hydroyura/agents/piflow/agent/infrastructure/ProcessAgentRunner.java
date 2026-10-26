@@ -158,6 +158,7 @@ public class ProcessAgentRunner implements AgentProcessRunner {
 		appendText(message, request.instruction());
 		appendText(message, request.inputData());
 		appendText(message, request.context());
+		appendText(message, request.feedback());
 		return message.toString();
 	}
 

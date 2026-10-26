@@ -14,6 +14,7 @@ import java.util.Map;
  * @param workingDirectory рабочая директория проекта
  * @param parameters параметры запуска
  * @param timeout ограничение времени выполнения; {@code null} — использовать default из конфигурации
+ * @param feedback необязательные замечания пользователя для агента
  */
 public record StartAgentCommand(
 		AgentRole role,
@@ -22,7 +23,8 @@ public record StartAgentCommand(
 		String context,
 		Path workingDirectory,
 		Map<String, String> parameters,
-		Duration timeout) {
+		Duration timeout,
+		String feedback) {
 
 	public StartAgentCommand {
 		parameters = parameters == null ? Map.of() : Map.copyOf(parameters);

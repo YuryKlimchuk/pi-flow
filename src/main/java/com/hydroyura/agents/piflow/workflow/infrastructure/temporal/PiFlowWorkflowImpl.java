@@ -44,6 +44,8 @@ public class PiFlowWorkflowImpl implements PiFlowWorkflow {
 				input.owner(),
 				input.repository(),
 				input.issueNumber(),
-				prepared.path()));
+				prepared.path(),
+				input.feedback(),
+				input.analysisText()));
 	}
 }

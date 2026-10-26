@@ -137,7 +137,7 @@ class WorkflowAnalysisActivitiesImplTest {
 	@Test
 	void analyze_whenMissingWorkspace_shouldThrowInvalidResult() {
 		WorkflowAnalysisException error = catchThrowableOfType(
-				() -> activity.analyze(new WorkflowAnalysisInput("wf-1", "url", "acme", "demo", 42, null)),
+				() -> activity.analyze(new WorkflowAnalysisInput("wf-1", "url", "acme", "demo", 42, null, null, null)),
 				WorkflowAnalysisException.class);
 
 		assertThat(error.reason()).isEqualTo(WorkflowAnalysisException.Reason.INVALID_RESULT);
@@ -200,9 +200,23 @@ class WorkflowAnalysisActivitiesImplTest {
 		assertThat(WorkflowAnalysisActivitiesImpl.isValidBranchName("feature@{x}")).isFalse();
 	}
 
+	@Test
+	void analyze_whenFeedbackPresent_shouldIncludeInInstruction() throws IOException {
+		writeArtifact("анализ");
+		writeBranch("feature/issue-42");
+		when(agentOperations.run(any())).thenReturn(successResult());
+
+		activity.analyze(new WorkflowAnalysisInput("wf-1", "https://github.com/acme/demo.git", "acme", "demo", 42,
+				workspace.toString(), "Добавь риски миграции", null));
+
+		ArgumentCaptor<StartAgentCommand> captor = ArgumentCaptor.forClass(StartAgentCommand.class);
+		verify(agentOperations).run(captor.capture());
+		assertThat(captor.getValue().instruction()).contains("Добавь риски миграции");
+	}
+
 	private WorkflowAnalysisInput input() {
 		return new WorkflowAnalysisInput("wf-1", "https://github.com/acme/demo.git", "acme", "demo", 42,
-				workspace.toString());
+				workspace.toString(), null, null);
 	}
 
 	private AgentRunResult successResult() {

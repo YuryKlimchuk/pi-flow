@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import com.hydroyura.agents.piflow.workflow.api.WorkflowException;
 import com.hydroyura.agents.piflow.workflow.application.WorkflowExecutionCommand;
+import com.hydroyura.agents.piflow.workflow.application.WorkflowExecutionKind;
 import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.PiFlowWorkflow;
 
 import io.temporal.client.WorkflowClient;
@@ -31,7 +32,7 @@ class TemporalWorkflowAdapterTest {
 				.thenThrow(new RuntimeException("connection refused"));
 
 		WorkflowException error = catchThrowableOfType(
-				() -> adapter.start(new WorkflowExecutionCommand("wf-1", "https://github.com/acme/demo.git", "acme", "demo", 42)),
+				() -> adapter.start(new WorkflowExecutionCommand("wf-1", "https://github.com/acme/demo.git", "acme", "demo", 42, null, null, WorkflowExecutionKind.ANALYST)),
 				WorkflowException.class);
 
 		assertThat(error.errorType()).isEqualTo(WorkflowException.ErrorType.EXECUTION);

@@ -14,5 +14,8 @@ public record WorkflowExecutionCommand(
 		String repositoryUrl,
 		String owner,
 		String repository,
-		long issueNumber) {
+		long issueNumber,
+		String feedback,
+		String analysisText,
+		WorkflowExecutionKind kind) {
 }

@@ -28,4 +28,12 @@ public interface WorkflowOperations {
 	 * @return публичное состояние после перехода на следующий этап
 	 */
 	WorkflowState continueWorkflow(ContinueWorkflowCommand command);
+
+	/**
+	 * Перезапускает анализ Workflow с замечаниями пользователя.
+	 *
+	 * @param command команда повторного анализа
+	 * @return публичное состояние после возврата к анализу
+	 */
+	WorkflowState rework(ReworkWorkflowCommand command);
 }

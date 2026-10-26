@@ -21,4 +21,13 @@ public interface WorkspaceOperations {
 	 * @return текст и метаданные артефакта
 	 */
 	WorkspaceArtifactResult readAnalysisArtifact(String workspacePath);
+
+	/**
+	 * Читает ожидаемый артефакт проектирования {@code .pi-flow/design/architect.md}
+	 * внутри подготовленного workspace.
+	 *
+	 * @param workspacePath путь к подготовленному workspace
+	 * @return текст и метаданные артефакта
+	 */
+	WorkspaceArtifactResult readDesignArtifact(String workspacePath);
 }

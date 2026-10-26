@@ -41,7 +41,8 @@ public class WorkflowAnalysisActivitiesImpl implements WorkflowAnalysisActivitie
 				input.repositoryUrl(),
 				workspace,
 				java.util.Map.of(),
-				null);
+				null,
+				input.feedback());
 
 		AgentRunResult result;
 		try {
@@ -78,7 +79,7 @@ public class WorkflowAnalysisActivitiesImpl implements WorkflowAnalysisActivitie
 	}
 
 	private String buildInstruction(WorkflowAnalysisInput input, Path workspace) {
-		return """
+		String instruction = """
 				Проанализируй проект и исходную задачу GitHub Issue.
 
 				Issue: %s/%s#%d
@@ -99,6 +100,13 @@ public class WorkflowAnalysisActivitiesImpl implements WorkflowAnalysisActivitie
 				input.repositoryUrl(), workspace,
 				workspace.resolve(ARTIFACT_RELATIVE_PATH),
 				workspace.resolve(BRANCH_RELATIVE_PATH));
+		if (input.feedback() != null && !input.feedback().isBlank()) {
+			instruction += "\n\nЗамечания пользователя (учти их при анализе):\n" + input.feedback();
+		}
+		if (input.analysisText() != null && !input.analysisText().isBlank()) {
+			instruction += "\n\nПредыдущий результат анализа:\n" + input.analysisText();
+		}
+		return instruction;
 	}
 
 	private String issueContext(WorkflowAnalysisInput input) {

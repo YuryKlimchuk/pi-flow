@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import com.hydroyura.agents.piflow.workspace.api.WorkspaceArtifactResult;
 import com.hydroyura.agents.piflow.workspace.api.WorkspaceOperations;
 import com.hydroyura.agents.piflow.workflow.api.ContinueWorkflowCommand;
+import com.hydroyura.agents.piflow.workflow.api.ReworkWorkflowCommand;
 import com.hydroyura.agents.piflow.workflow.api.StartWorkflowCommand;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowException;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStage;
@@ -146,6 +147,8 @@ class WorkflowServiceTest {
 		WorkflowState state = service.continueWorkflow(new ContinueWorkflowCommand("wf-1", "feature/issue-42"));
 
 		assertThat(state.currentStage()).isEqualTo(WorkflowStage.DESIGNING_SOLUTION);
+		assertThat(state.analysisText()).isNull();
+		assertThat(state.branchName()).isNull();
 	}
 
 	@Test
@@ -157,6 +160,54 @@ class WorkflowServiceTest {
 				WorkflowException.class);
 
 		assertThat(error.errorType()).isEqualTo(WorkflowException.ErrorType.ILLEGAL_TRANSITION);
+	}
+
+	@Test
+	void rework_whenResultRecorded_shouldStartNewExecutionAndReset() {
+		startWorkflow("exec-1");
+		when(executionPort.getState("exec-1")).thenReturn(
+				WorkflowExecutionState.succeeded("/ws", "feature/issue-42"));
+		when(workspaceOperations.readAnalysisArtifact("/ws")).thenReturn(
+				new WorkspaceArtifactResult("analysis text", "/ws/x", 13));
+		service.getState("wf-1");
+		when(executionPort.start(any())).thenReturn(new WorkflowExecutionResult("exec-2"));
+
+		WorkflowState state = service.rework(new ReworkWorkflowCommand("wf-1", "добавь риски"));
+
+		assertThat(state.currentStage()).isEqualTo(WorkflowStage.ANALYZING_REQUIREMENTS);
+		assertThat(state.analysisText()).isNull();
+		assertThat(state.branchName()).isNull();
+		assertThat(state.executionId()).isEqualTo("exec-2");
+		verify(executionPort).start(argThat(cmd -> "добавь риски".equals(cmd.feedback())));
+	}
+
+	@Test
+	void rework_whenBlankFeedback_shouldReject() {
+		startWorkflow("exec-1");
+
+		WorkflowException error = catchThrowableOfType(
+				() -> service.rework(new ReworkWorkflowCommand("wf-1", "  ")),
+				WorkflowException.class);
+
+		assertThat(error.errorType()).isEqualTo(WorkflowException.ErrorType.VALIDATION);
+	}
+
+	@Test
+	void rework_whenExecutionFails_shouldMarkFailed() {
+		startWorkflow("exec-1");
+		when(executionPort.getState("exec-1")).thenReturn(
+				WorkflowExecutionState.succeeded("/ws", "feature/issue-42"));
+		when(workspaceOperations.readAnalysisArtifact("/ws")).thenReturn(
+				new WorkspaceArtifactResult("text", "/ws/x", 4));
+		service.getState("wf-1");
+		when(executionPort.start(any())).thenThrow(WorkflowException.execution("boom", new RuntimeException()));
+
+		WorkflowException error = catchThrowableOfType(
+				() -> service.rework(new ReworkWorkflowCommand("wf-1", "feedback")),
+				WorkflowException.class);
+
+		assertThat(error.errorType()).isEqualTo(WorkflowException.ErrorType.EXECUTION);
+		assertThat(service.getState("wf-1").status()).isEqualTo(WorkflowStatus.FAILED);
 	}
 
 	private void startWorkflow(String executionId) {

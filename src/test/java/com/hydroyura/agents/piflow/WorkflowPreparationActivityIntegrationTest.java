@@ -62,7 +62,7 @@ class WorkflowPreparationActivityIntegrationTest {
 
 	@Test
 	void prepare_shouldCloneAndCreateWorkingBranch() {
-		WorkflowInput input = new WorkflowInput("WF-1", sourceUrl, "local", "source", 42);
+		WorkflowInput input = new WorkflowInput("WF-1", sourceUrl, "local", "source", 42, null, null);
 
 		WorkflowPreparationResult result = activity.prepare(input);
 
@@ -73,7 +73,7 @@ class WorkflowPreparationActivityIntegrationTest {
 
 	@Test
 	void prepare_whenSourceUnavailable_shouldPropagateWorkspaceError() {
-		WorkflowInput input = new WorkflowInput("WF-2", "file:///nonexistent/repo.git", "local", "source", 42);
+		WorkflowInput input = new WorkflowInput("WF-2", "file:///nonexistent/repo.git", "local", "source", 42, null, null);
 
 		assertThatThrownBy(() -> activity.prepare(input))
 				.isInstanceOf(com.hydroyura.agents.piflow.workspace.api.WorkspaceException.class);

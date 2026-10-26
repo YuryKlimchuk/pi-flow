@@ -26,6 +26,7 @@ public final class Workflow {
 	private String executionId;
 	private String branchName;
 	private String analysisText;
+	private String designText;
 	private String failureReason;
 
 	private static final Map<WorkflowStage, Set<WorkflowStage>> NEXT_STAGES = nextStages();
@@ -81,6 +82,10 @@ public final class Workflow {
 		return analysisText;
 	}
 
+	public String designText() {
+		return designText;
+	}
+
 	public String failureReason() {
 		return failureReason;
 	}
@@ -110,16 +115,60 @@ public final class Workflow {
 		this.branchName = branchName;
 		this.analysisText = analysisText;
 		checkpoints.add(new Checkpoint("analysis", branchName == null ? "" : branchName));
+		waitForUser();
 	}
 
 	/**
-	 * Продолжает Workflow после успешного анализа на следующий этап.
+	 * Продолжает Workflow после успешного анализа на следующий этап ровно один раз.
 	 */
 	public void continueAfterAnalysis() {
+		if (status != WorkflowStatus.WAITING_FOR_USER) {
+			throw new IllegalWorkflowTransitionException("cannot continue from status " + status);
+		}
+		if (currentStage != WorkflowStage.ANALYZING_REQUIREMENTS) {
+			throw new IllegalWorkflowTransitionException("cannot continue from stage " + currentStage);
+		}
 		if (analysisText == null || branchName == null) {
 			throw new IllegalWorkflowTransitionException("cannot continue without a recorded analysis result");
 		}
+		resume();
 		completeStage();
+		this.analysisText = null;
+		this.branchName = null;
+	}
+
+	/**
+	 * Возвращает Workflow к анализу для повторного запуска с замечаниями.
+	 *
+	 * @param feedback замечания пользователя к текущему анализу
+	 */
+	public void rework(String feedback) {
+		if (status != WorkflowStatus.WAITING_FOR_USER) {
+			throw new IllegalWorkflowTransitionException("cannot rework from status " + status);
+		}
+		if (currentStage != WorkflowStage.ANALYZING_REQUIREMENTS) {
+			throw new IllegalWorkflowTransitionException("cannot rework from stage " + currentStage);
+		}
+		if (analysisText == null) {
+			throw new IllegalWorkflowTransitionException("cannot rework without a recorded analysis result");
+		}
+		resume();
+		this.analysisText = null;
+		this.branchName = null;
+		checkpoints.add(new Checkpoint("rework", feedback == null ? "" : feedback));
+	}
+
+	/**
+	 * Фиксирует результат проектирования Architect.
+	 *
+	 * @param designText текст design-артефакта
+	 */
+	public void recordDesign(String designText) {
+		if (currentStage != WorkflowStage.DESIGNING_SOLUTION) {
+			throw new IllegalWorkflowTransitionException("cannot record design from stage " + currentStage);
+		}
+		this.designText = designText;
+		checkpoints.add(new Checkpoint("design", ""));
 	}
 
 	/**

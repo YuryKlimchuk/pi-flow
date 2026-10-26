@@ -123,7 +123,7 @@ class TemporalWorkflowIntegrationTest {
 	}
 
 	private WorkflowInput input() {
-		return new WorkflowInput("wf-1", "https://github.com/acme/demo.git", "acme", "demo", 42);
+		return new WorkflowInput("wf-1", "https://github.com/acme/demo.git", "acme", "demo", 42, null, null);
 	}
 
 	private WorkspaceResult preparedWorkspace() {

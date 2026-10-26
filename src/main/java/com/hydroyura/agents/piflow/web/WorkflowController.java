@@ -4,6 +4,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
 import com.hydroyura.agents.piflow.workflow.api.ContinueWorkflowCommand;
+import com.hydroyura.agents.piflow.workflow.api.ReworkWorkflowCommand;
 import com.hydroyura.agents.piflow.workflow.api.StartWorkflowCommand;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowException;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowOperations;
@@ -69,6 +70,28 @@ public class WorkflowController {
 			@RequestParam("branchName") String branchName) {
 		workflowOperations.continueWorkflow(new ContinueWorkflowCommand(workflowId, branchName));
 		return "redirect:/workflows/track?workflowId=" + encode(workflowId);
+	}
+
+	@PostMapping("/workflows/rework")
+	public String rework(@RequestParam("workflowId") String workflowId,
+			@RequestParam("feedback") String feedback, Model model) {
+		try {
+			workflowOperations.rework(new ReworkWorkflowCommand(workflowId, feedback));
+			return "redirect:/workflows/track?workflowId=" + encode(workflowId);
+		} catch (WorkflowException e) {
+			model.addAttribute("workflowId", workflowId);
+			model.addAttribute("state", currentState(workflowId));
+			model.addAttribute("error", message(e));
+			return "workflow-status";
+		}
+	}
+
+	private WorkflowState currentState(String workflowId) {
+		try {
+			return workflowOperations.getState(workflowId);
+		} catch (WorkflowException e) {
+			return null;
+		}
 	}
 
 	private String encode(String value) {

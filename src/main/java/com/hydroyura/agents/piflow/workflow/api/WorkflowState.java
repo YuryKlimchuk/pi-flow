@@ -14,6 +14,7 @@ import java.util.List;
  * @param executionId идентификатор исполнения Temporal, если задан
  * @param analysisText текст артефакта анализа, если анализ завершён
  * @param branchName предложенное имя ветки, если анализ завершён
+ * @param designText текст design-артефакта, если проектирование завершено
  * @param errorMessage сообщение об ошибке, если workflow завершился ошибкой
  */
 public record WorkflowState(
@@ -26,5 +27,6 @@ public record WorkflowState(
 		String executionId,
 		String analysisText,
 		String branchName,
+		String designText,
 		String errorMessage) {
 }

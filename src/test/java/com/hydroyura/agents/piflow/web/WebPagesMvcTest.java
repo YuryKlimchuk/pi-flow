@@ -23,6 +23,7 @@ import com.hydroyura.agents.piflow.github.api.PageRequest;
 import com.hydroyura.agents.piflow.github.api.RepositoryOperations;
 import com.hydroyura.agents.piflow.github.api.RepositoryPage;
 import com.hydroyura.agents.piflow.github.api.RepositorySummary;
+import com.hydroyura.agents.piflow.workflow.api.WorkflowException;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowOperations;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStage;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowState;
@@ -223,9 +224,55 @@ class WebPagesMvcTest {
 		verify(workflowOperations).continueWorkflow(any());
 	}
 
+	@Test
+	void workflowRework_shouldCallReworkAndRedirect() throws Exception {
+		mockMvc.perform(post("/workflows/rework")
+					.param("workflowId", "wf-1")
+					.param("feedback", "добавь риски"))
+				.andExpect(status().is3xxRedirection())
+				.andExpect(redirectedUrl("/workflows/track?workflowId=wf-1"));
+
+		verify(workflowOperations).rework(any());
+	}
+
+	@Test
+	void workflowRework_whenBlankFeedback_shouldShowError() throws Exception {
+		when(workflowOperations.rework(any())).thenThrow(WorkflowException.validation("feedback must not be blank"));
+		when(workflowOperations.getState("wf-1")).thenReturn(
+				state(WorkflowStatus.RUNNING, WorkflowStage.ANALYZING_REQUIREMENTS, "text", "feature/issue-42", null));
+
+		mockMvc.perform(post("/workflows/rework")
+					.param("workflowId", "wf-1")
+					.param("feedback", "  "))
+				.andExpect(status().isOk())
+				.andExpect(view().name("workflow-status"))
+				.andExpect(content().string(containsString("feedback must not be blank")));
+	}
+
+	@Test
+	void workflowTrack_whenDesigningSolution_shouldShowArchitectProgress() throws Exception {
+		when(workflowOperations.getState("wf-1")).thenReturn(
+				state(WorkflowStatus.RUNNING, WorkflowStage.DESIGNING_SOLUTION, null, null, null));
+
+		mockMvc.perform(get("/workflows/track").param("workflowId", "wf-1"))
+				.andExpect(status().isOk())
+				.andExpect(content().string(containsString("Проектирование решения выполняется")));
+	}
+
+	@Test
+	void workflowTrack_whenWaitingForUser_shouldShowResultAndActions() throws Exception {
+		when(workflowOperations.getState("wf-1")).thenReturn(
+				state(WorkflowStatus.WAITING_FOR_USER, WorkflowStage.ANALYZING_REQUIREMENTS, "Текст анализа", "feature/issue-42", null));
+
+		mockMvc.perform(get("/workflows/track").param("workflowId", "wf-1"))
+				.andExpect(status().isOk())
+				.andExpect(content().string(containsString("ожидание вашего решения")))
+				.andExpect(content().string(containsString("Исправить")));
+	}
+
 	private WorkflowState state(WorkflowStatus status, WorkflowStage stage, String analysisText, String branchName,
 			String errorMessage) {
 		return new WorkflowState("wf-1", "https://github.com/acme/demo.git", 42, status, stage, List.of(), "exec-1",
-				analysisText, branchName, errorMessage);
+				analysisText, branchName, null, errorMessage);
 	}
 }

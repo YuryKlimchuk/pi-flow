@@ -55,25 +55,34 @@ public class WorkspaceService implements WorkspaceOperations {
 
 	@Override
 	public WorkspaceArtifactResult readAnalysisArtifact(String workspacePath) {
+		return readArtifact(workspacePath, ".pi-flow/analysis/analyst.md");
+	}
+
+	@Override
+	public WorkspaceArtifactResult readDesignArtifact(String workspacePath) {
+		return readArtifact(workspacePath, ".pi-flow/design/architect.md");
+	}
+
+	private WorkspaceArtifactResult readArtifact(String workspacePath, String relativePath) {
 		if (workspacePath == null || workspacePath.isBlank()) {
 			throw WorkspaceException.validation("workspace path must not be blank");
 		}
 		Path root = Path.of(workspacePath).normalize();
-		Path artifact = root.resolve(".pi-flow/analysis/analyst.md").normalize();
+		Path artifact = root.resolve(relativePath).normalize();
 		if (!artifact.startsWith(root)) {
-			throw WorkspaceException.validation("analysis artifact path escapes workspace root");
+			throw WorkspaceException.validation("artifact path escapes workspace root");
 		}
 		if (!Files.isRegularFile(artifact) || !Files.isReadable(artifact)) {
-			throw WorkspaceException.result("analysis artifact missing or not readable: " + artifact);
+			throw WorkspaceException.result("artifact missing or not readable: " + artifact);
 		}
 		try {
 			String text = Files.readString(artifact);
 			if (text == null || text.isBlank()) {
-				throw WorkspaceException.result("analysis artifact is empty: " + artifact);
+				throw WorkspaceException.result("artifact is empty: " + artifact);
 			}
 			return new WorkspaceArtifactResult(text, artifact.toString(), Files.size(artifact));
 		} catch (IOException e) {
-			throw WorkspaceException.filesystem("cannot read analysis artifact: " + artifact, e);
+			throw WorkspaceException.filesystem("cannot read artifact: " + artifact, e);
 		}
 	}
 

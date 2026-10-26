@@ -41,7 +41,7 @@ class AgentServiceTest {
 
 	@Test
 	void run_whenValid_shouldDelegateAndMap() {
-		var command = new StartAgentCommand(AgentRole.ANALYST, "do", "input", "ctx", tempDir, Map.of(), null);
+		var command = new StartAgentCommand(AgentRole.ANALYST, "do", "input", "ctx", tempDir, Map.of(), null, null);
 		when(runner.execute(any())).thenReturn(new AgentProcessResult("r1", AgentProcessStatus.SUCCEEDED, "out", "err", 0));
 
 		AgentRunResult result = service.run(command);
@@ -57,7 +57,7 @@ class AgentServiceTest {
 	@Test
 	void run_whenWorkingDirectoryMissing_shouldThrowPreparationWithoutCallingRunner() {
 		Path missing = tempDir.resolve("missing");
-		var command = new StartAgentCommand(AgentRole.ANALYST, "do", "input", "ctx", missing, Map.of(), null);
+		var command = new StartAgentCommand(AgentRole.ANALYST, "do", "input", "ctx", missing, Map.of(), null, null);
 
 		AgentException error = catchThrowableOfType(() -> service.run(command), AgentException.class);
 
@@ -67,7 +67,7 @@ class AgentServiceTest {
 
 	@Test
 	void run_whenLaunchError_shouldMapToLaunch() {
-		var command = new StartAgentCommand(AgentRole.ANALYST, "do", "input", "ctx", tempDir, Map.of(), null);
+		var command = new StartAgentCommand(AgentRole.ANALYST, "do", "input", "ctx", tempDir, Map.of(), null, null);
 		when(runner.execute(any())).thenThrow(AgentProcessException.launch("boom", new IOException("no such file")));
 
 		AgentException error = catchThrowableOfType(() -> service.run(command), AgentException.class);
@@ -77,7 +77,7 @@ class AgentServiceTest {
 
 	@Test
 	void run_whenExecutionError_shouldMapToExecution() {
-		var command = new StartAgentCommand(AgentRole.ANALYST, "do", "input", "ctx", tempDir, Map.of(), null);
+		var command = new StartAgentCommand(AgentRole.ANALYST, "do", "input", "ctx", tempDir, Map.of(), null, null);
 		when(runner.execute(any())).thenThrow(AgentProcessException.execution("interrupted", new InterruptedException()));
 
 		AgentException error = catchThrowableOfType(() -> service.run(command), AgentException.class);

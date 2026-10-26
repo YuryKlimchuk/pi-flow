@@ -161,6 +161,6 @@ class ProcessAgentRunnerTest {
 	}
 
 	private AgentProcessRequest request(String runId, Duration timeout) {
-		return new AgentProcessRequest(runId, "ANALYST", "do something", "input", "context", workDir, Map.of(), timeout);
+		return new AgentProcessRequest(runId, "ANALYST", "do something", "input", "context", workDir, Map.of(), timeout, null);
 	}
 }

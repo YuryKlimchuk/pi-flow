@@ -57,7 +57,8 @@ public class AgentService implements AgentOperations {
 				command.context(),
 				command.workingDirectory(),
 				command.parameters(),
-				command.timeout());
+				command.timeout(),
+				command.feedback());
 	}
 
 	private AgentRunResult toResult(StartAgentCommand command, AgentProcessResult result) {

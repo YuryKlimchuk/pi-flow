@@ -16,5 +16,7 @@ public record WorkflowAnalysisInput(
 		String owner,
 		String repository,
 		long issueNumber,
-		String workspacePath) {
+		String workspacePath,
+		String feedback,
+		String analysisText) {
 }
