@@ -1,27 +1,50 @@
 package com.hydroyura.agents.piflow.workflow.infrastructure.temporal;
 
 import io.temporal.activity.ActivityOptions;
+import io.temporal.common.RetryOptions;
 import io.temporal.workflow.Workflow;
 import java.time.Duration;
 
 /**
- * Реализация Temporal workflow минимального сценария: подготовка workspace
- * выполняется в activity до завершения исполнения.
+ * Реализация Temporal workflow: подготовка workspace и анализ проекта
+ * выполняются в activity последовательно; успешное завершение возможно
+ * только после валидного результата анализа.
  *
- * <p>Запуск Pi-агента и дальнейшие стадии процесса находятся за пределами
- * текущего изменения.</p>
+ * <p>Workflow не выполняет Git-операции и не запускает Pi напрямую.</p>
  */
 public class PiFlowWorkflowImpl implements PiFlowWorkflow {
 
-	private final WorkflowPreparationActivities activities = Workflow.newActivityStub(
+	private static final RetryOptions RETRY_OPTIONS = RetryOptions.newBuilder()
+			.setMaximumAttempts(3)
+			.setInitialInterval(Duration.ofSeconds(1))
+			.setBackoffCoefficient(2.0)
+			.setMaximumInterval(Duration.ofSeconds(10))
+			.build();
+
+	private final WorkflowPreparationActivities preparationActivities = Workflow.newActivityStub(
 			WorkflowPreparationActivities.class,
 			ActivityOptions.newBuilder()
 					.setStartToCloseTimeout(Duration.ofMinutes(10))
+					.setRetryOptions(RETRY_OPTIONS)
+					.build());
+
+	private final WorkflowAnalysisActivities analysisActivities = Workflow.newActivityStub(
+			WorkflowAnalysisActivities.class,
+			ActivityOptions.newBuilder()
+					.setStartToCloseTimeout(Duration.ofMinutes(30))
+					.setRetryOptions(RETRY_OPTIONS)
 					.build());
 
 	@Override
 	public String execute(WorkflowInput input) {
-		WorkflowPreparationResult result = activities.prepare(input);
-		return result.branch() == null ? "prepared:" + input.workflowId() : result.branch();
+		WorkflowPreparationResult prepared = preparationActivities.prepare(input);
+		WorkflowAnalysisResult analysis = analysisActivities.analyze(new WorkflowAnalysisInput(
+				input.workflowId(),
+				input.repositoryUrl(),
+				input.owner(),
+				input.repository(),
+				input.issueNumber(),
+				prepared.path()));
+		return analysis.artifactPath();
 	}
 }

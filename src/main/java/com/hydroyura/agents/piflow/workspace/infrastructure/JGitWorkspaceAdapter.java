@@ -3,7 +3,10 @@ package com.hydroyura.agents.piflow.workspace.infrastructure;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.hydroyura.agents.piflow.workspace.domain.LocalGit;
 import com.hydroyura.agents.piflow.workspace.domain.WorkspaceGitException;
@@ -14,6 +17,7 @@ import org.eclipse.jgit.api.Status;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.springframework.stereotype.Component;
 
@@ -50,6 +54,29 @@ public class JGitWorkspaceAdapter implements LocalGit {
 		} catch (GitAPIException | IOException e) {
 			throw WorkspaceGitException.git("failed to update repository: " + directory, e);
 		}
+	}
+
+	@Override
+	public String resolveBaseBranch(String repositoryUrl, String preferredBranch) {
+		try {
+			Collection<Ref> refs = Git.lsRemoteRepository()
+					.setHeads(true)
+					.setRemote(repositoryUrl)
+					.call();
+			Set<String> heads = refs.stream()
+					.map(ref -> ref.getName().replaceFirst("^refs/heads/", ""))
+					.collect(Collectors.toSet());
+			if (heads.contains(preferredBranch)) {
+				return preferredBranch;
+			}
+			if (heads.contains("main")) {
+				return "main";
+			}
+		} catch (GitAPIException ignored) {
+			// не удалось перечислить удалённые ветки — оставляем предпочтительную,
+			// нижестоящие операции выдадут внятную ошибку при реальной несовместимости.
+		}
+		return preferredBranch;
 	}
 
 	@Override

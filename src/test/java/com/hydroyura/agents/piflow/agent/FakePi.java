@@ -1,12 +1,13 @@
 package com.hydroyura.agents.piflow.agent;
 
-import java.nio.charset.StandardCharsets;
-
 /**
- * Тестовый исполняемый процесс, имитирующий Pi CLI для process-тестов модуля agent.
+ * Тестовый исполняемый процесс, имитирующий Pi CLI в print-режиме для
+ * process-тестов модуля agent.
  *
- * <p>Поддерживает режимы через аргументы: {@code --exit-code=N}, {@code --hang},
- * {@code --big}. Читает stdin и пишет его и окружение в stdout.</p>
+ * <p>Читает реальные аргументы Pi ({@code --append-system-prompt <file>},
+ * {@code --skill <dir>}, {@code --} и первый промпт) и управляется через
+ * переменные окружения: {@code FAKE_PI_EXIT_CODE}, {@code FAKE_PI_HANG},
+ * {@code FAKE_PI_BIG}.</p>
  */
 public final class FakePi {
 
@@ -14,20 +15,35 @@ public final class FakePi {
 	}
 
 	public static void main(String[] args) throws Exception {
-		int exitCode = 0;
-		boolean hang = false;
-		boolean big = false;
-		for (String arg : args) {
-			if (arg.startsWith("--exit-code=")) {
-				exitCode = Integer.parseInt(arg.substring("--exit-code=".length()));
-			} else if (arg.startsWith("--hang")) {
-				hang = true;
-			} else if (arg.startsWith("--big")) {
-				big = true;
+		boolean hang = "true".equals(System.getenv("FAKE_PI_HANG"));
+		boolean big = "true".equals(System.getenv("FAKE_PI_BIG"));
+		int exitCode = Integer.parseInt(envOrDefault("FAKE_PI_EXIT_CODE", "0"));
+
+		String systemPrompt = null;
+		String skill = null;
+		StringBuilder message = new StringBuilder();
+		boolean afterDoubleDash = false;
+		for (int i = 0; i < args.length; i++) {
+			String arg = args[i];
+			if (!afterDoubleDash && "--".equals(arg)) {
+				afterDoubleDash = true;
+				continue;
+			}
+			if (!afterDoubleDash && "--append-system-prompt".equals(arg)) {
+				systemPrompt = args[++i];
+				continue;
+			}
+			if (!afterDoubleDash && "--skill".equals(arg)) {
+				skill = args[++i];
+				continue;
+			}
+			if (afterDoubleDash) {
+				if (!message.isEmpty()) {
+					message.append(' ');
+				}
+				message.append(arg);
 			}
 		}
-
-		String stdin = new String(System.in.readAllBytes(), StandardCharsets.UTF_8);
 
 		if (hang) {
 			Thread.sleep(120_000);
@@ -41,8 +57,10 @@ public final class FakePi {
 				System.err.print(chunk);
 			}
 		} else {
-			System.out.println("STDIN:" + stdin);
 			System.out.println("ARGS:" + String.join("|", args));
+			System.out.println("SYSTEM_PROMPT:" + systemPrompt);
+			System.out.println("SKILL:" + skill);
+			System.out.println("MESSAGE:" + message);
 			System.out.println("ENV_SECRET:" + System.getenv("SECRET_VAR"));
 			System.out.println("ENV_OTHER:" + System.getenv("OTHER"));
 			System.err.println("STDERR:done");
@@ -51,5 +69,10 @@ public final class FakePi {
 		System.out.flush();
 		System.err.flush();
 		System.exit(exitCode);
+	}
+
+	private static String envOrDefault(String name, String defaultValue) {
+		String value = System.getenv(name);
+		return value == null ? defaultValue : value;
 	}
 }

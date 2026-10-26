@@ -20,6 +20,7 @@ import com.hydroyura.agents.piflow.agent.domain.AgentProcessException;
 import com.hydroyura.agents.piflow.agent.domain.AgentProcessRequest;
 import com.hydroyura.agents.piflow.agent.domain.AgentProcessResult;
 import com.hydroyura.agents.piflow.agent.domain.AgentProcessStatus;
+import com.hydroyura.agents.piflow.agent.domain.RoleResources;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,22 +46,26 @@ class ProcessAgentRunnerTest {
 	}
 
 	@Test
-	void execute_whenExitZero_shouldReturnSucceededWithStdout() throws Exception {
+	void execute_whenExitZero_shouldReturnSucceededWithPrintCommand() {
 		ProcessAgentRunner runner = runner(defaultProperties(), Map.of());
 
-		AgentProcessResult result = runner.execute(request(Map.of(), null));
+		AgentProcessResult result = runner.execute(request(null));
 
 		assertThat(result.status()).isEqualTo(AgentProcessStatus.SUCCEEDED);
 		assertThat(result.exitCode()).isZero();
-		assertThat(result.stdout()).contains("STDIN:do something");
-		assertThat(result.stdout()).contains("--role");
+		assertThat(result.stdout()).contains("--print");
+		assertThat(result.stdout()).contains("--append-system-prompt");
+		assertThat(result.stdout()).contains("--skill");
+		assertThat(result.stdout()).contains("SYSTEM_PROMPT:" + workDir.resolve("system-prompt.md"));
+		assertThat(result.stdout()).contains("SKILL:" + workDir.resolve("skills"));
+		assertThat(result.stdout()).contains("MESSAGE:do something");
 	}
 
 	@Test
 	void execute_whenNonZeroExit_shouldReturnFailedWithExitCode() {
-		ProcessAgentRunner runner = runner(defaultProperties(), Map.of());
+		ProcessAgentRunner runner = runner(propertiesWithEnv("FAKE_PI_EXIT_CODE"), Map.of("FAKE_PI_EXIT_CODE", "7"));
 
-		AgentProcessResult result = runner.execute(request(Map.of("exit-code", "7"), null));
+		AgentProcessResult result = runner.execute(request(null));
 
 		assertThat(result.status()).isEqualTo(AgentProcessStatus.FAILED);
 		assertThat(result.exitCode()).isEqualTo(7);
@@ -72,7 +77,7 @@ class ProcessAgentRunnerTest {
 				Duration.ofSeconds(5), Map.of());
 		ProcessAgentRunner runner = runner(properties, Map.of());
 
-		AgentProcessException error = catchThrowableOfType(() -> runner.execute(request(Map.of(), null)),
+		AgentProcessException error = catchThrowableOfType(() -> runner.execute(request(null)),
 				AgentProcessException.class);
 
 		assertThat(error.errorType()).isEqualTo(AgentProcessException.ErrorType.LAUNCH);
@@ -80,9 +85,9 @@ class ProcessAgentRunnerTest {
 
 	@Test
 	void execute_whenBigOutput_shouldDrainBothStreams() {
-		ProcessAgentRunner runner = runner(defaultProperties(), Map.of());
+		ProcessAgentRunner runner = runner(propertiesWithEnv("FAKE_PI_BIG"), Map.of("FAKE_PI_BIG", "true"));
 
-		AgentProcessResult result = runner.execute(request(Map.of("big", "true"), null));
+		AgentProcessResult result = runner.execute(request(null));
 
 		assertThat(result.status()).isEqualTo(AgentProcessStatus.SUCCEEDED);
 		assertThat(result.stdout()).hasSizeGreaterThan(64 * 1024);
@@ -91,18 +96,18 @@ class ProcessAgentRunnerTest {
 
 	@Test
 	void execute_whenTimeoutExceeded_shouldReturnTimedOut() {
-		ProcessAgentRunner runner = runner(defaultProperties(), Map.of());
+		ProcessAgentRunner runner = runner(propertiesWithEnv("FAKE_PI_HANG"), Map.of("FAKE_PI_HANG", "true"));
 
-		AgentProcessResult result = runner.execute(request(Map.of("hang", "true"), Duration.ofMillis(500)));
+		AgentProcessResult result = runner.execute(request(Duration.ofMillis(500)));
 
 		assertThat(result.status()).isEqualTo(AgentProcessStatus.TIMED_OUT);
 	}
 
 	@Test
 	void cancel_whenRunActive_shouldReturnCancelled() throws Exception {
-		ProcessAgentRunner runner = runner(defaultProperties(), Map.of());
+		ProcessAgentRunner runner = runner(propertiesWithEnv("FAKE_PI_HANG"), Map.of("FAKE_PI_HANG", "true"));
 		String runId = "run-1";
-		Future<AgentProcessResult> future = executor.submit(() -> runner.execute(request(runId, Map.of("hang", "true"), null)));
+		Future<AgentProcessResult> future = executor.submit(() -> runner.execute(request(runId, null)));
 
 		Thread.sleep(500);
 		runner.cancel(runId);
@@ -117,7 +122,7 @@ class ProcessAgentRunnerTest {
 				List.of("SECRET_VAR"), Duration.ofSeconds(5), Map.of());
 		ProcessAgentRunner runner = runner(properties, Map.of("SECRET_VAR", "hunter2", "OTHER", "other-value"));
 
-		AgentProcessResult result = runner.execute(request(Map.of(), null));
+		AgentProcessResult result = runner.execute(request(null));
 
 		assertThat(result.stdout()).contains("ENV_SECRET:hunter2");
 		assertThat(result.stdout()).contains("ENV_OTHER:null");
@@ -128,16 +133,34 @@ class ProcessAgentRunnerTest {
 				Duration.ofSeconds(30), Map.of());
 	}
 
+	private AgentProperties propertiesWithEnv(String allowedEnv) {
+		return new AgentProperties(JAVA, List.of("-cp", CLASSPATH, FakePi.class.getName()), List.of(allowedEnv),
+				Duration.ofSeconds(30), Map.of());
+	}
+
 	private ProcessAgentRunner runner(AgentProperties properties, Map<String, String> env) {
-		return new ProcessAgentRunner(properties, name -> env.get(name));
+		return new ProcessAgentRunner(properties, roleResources(workDir), name -> env.get(name));
 	}
 
-	private AgentProcessRequest request(Map<String, String> parameters, Duration timeout) {
-		return request("run-id", parameters, timeout);
+	private RoleResources roleResources(Path dir) {
+		return new RoleResources() {
+			@Override
+			public Path systemPromptFile(String role) {
+				return dir.resolve("system-prompt.md");
+			}
+
+			@Override
+			public Path skillsDirectory(String role) {
+				return dir.resolve("skills");
+			}
+		};
 	}
 
-	private AgentProcessRequest request(String runId, Map<String, String> parameters, Duration timeout) {
-		return new AgentProcessRequest(runId, "ANALYST", "do something", "input", "context", workDir, parameters,
-				timeout);
+	private AgentProcessRequest request(Duration timeout) {
+		return request("run-id", timeout);
+	}
+
+	private AgentProcessRequest request(String runId, Duration timeout) {
+		return new AgentProcessRequest(runId, "ANALYST", "do something", "input", "context", workDir, Map.of(), timeout);
 	}
 }

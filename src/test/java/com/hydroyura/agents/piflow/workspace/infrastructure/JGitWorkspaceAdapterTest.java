@@ -43,6 +43,26 @@ class JGitWorkspaceAdapterTest {
 	}
 
 	@Test
+	void resolveBaseBranch_whenPreferredExists_shouldReturnPreferred() {
+		String resolved = adapter.resolveBaseBranch(source.toUri().toString(), branch);
+
+		assertThat(resolved).isEqualTo(branch);
+	}
+
+	@Test
+	void resolveBaseBranch_whenMasterMissing_shouldReturnMain() throws Exception {
+		try (Git git = Git.open(source.toFile())) {
+			if (!"main".equals(branch)) {
+				git.branchRename().setOldName(branch).setNewName("main").call();
+			}
+		}
+
+		String resolved = adapter.resolveBaseBranch(source.toUri().toString(), "master");
+
+		assertThat(resolved).isEqualTo("main");
+	}
+
+	@Test
 	void isRepository_whenEmptyDirectory_shouldReturnFalse() {
 		assertThat(adapter.isRepository(tempDir.resolve("empty"))).isFalse();
 	}

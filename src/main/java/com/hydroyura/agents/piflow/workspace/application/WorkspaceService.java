@@ -29,18 +29,19 @@ public class WorkspaceService implements WorkspaceOperations {
 	public WorkspaceResult prepare(WorkspacePreparationRequest request) {
 		request.validate();
 		validateBaseDirectory();
+		String baseBranch = localGit.resolveBaseBranch(request.repositoryUrl(), request.targetBranch());
 
 		Path directory = layout.repositoryDirectory(request.repositoryUrl());
 		try {
 			if (Files.isDirectory(directory)) {
-				prepareExisting(request, directory);
+				prepareExisting(request, directory, baseBranch);
 			} else {
-				prepareNew(request, directory);
+				prepareNew(request, directory, baseBranch);
 			}
 
 			String branch = workingBranch(request.workflowId());
 			if (!localGit.branchExists(directory, branch)) {
-				localGit.createBranch(directory, branch, request.targetBranch());
+				localGit.createBranch(directory, branch, baseBranch);
 			}
 			localGit.checkout(directory, branch);
 
@@ -51,23 +52,23 @@ public class WorkspaceService implements WorkspaceOperations {
 		}
 	}
 
-	private void prepareExisting(WorkspacePreparationRequest request, Path directory) {
+	private void prepareExisting(WorkspacePreparationRequest request, Path directory, String baseBranch) {
 		if (!localGit.isRepository(directory)) {
 			throw WorkspaceException.corrupt("directory is not a valid git repository: " + directory);
 		}
 		if (!localGit.isClean(directory)) {
 			throw WorkspaceException.dirty("working copy has uncommitted changes: " + directory);
 		}
-		localGit.updateToRemote(directory, request.targetBranch());
+		localGit.updateToRemote(directory, baseBranch);
 	}
 
-	private void prepareNew(WorkspacePreparationRequest request, Path directory) {
+	private void prepareNew(WorkspacePreparationRequest request, Path directory, String baseBranch) {
 		try {
 			Files.createDirectories(directory.getParent());
 		} catch (IOException e) {
 			throw WorkspaceException.filesystem("cannot create base directory: " + directory.getParent(), e);
 		}
-		localGit.cloneRepository(request.repositoryUrl(), directory, request.targetBranch());
+		localGit.cloneRepository(request.repositoryUrl(), directory, baseBranch);
 	}
 
 	private void validateBaseDirectory() {

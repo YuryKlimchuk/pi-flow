@@ -30,53 +30,58 @@ import com.hydroyura.agents.piflow.agent.domain.AgentProcessRequest;
 import com.hydroyura.agents.piflow.agent.domain.AgentProcessResult;
 import com.hydroyura.agents.piflow.agent.domain.AgentProcessRunner;
 import com.hydroyura.agents.piflow.agent.domain.AgentProcessStatus;
+import com.hydroyura.agents.piflow.agent.domain.RoleResources;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
  * Адаптер запуска Pi через CLI/subprocess на базе {@link ProcessBuilder}.
  *
- * <p>Инкапсулирует создание процесса, передачу задачи через stdin, параллельное
- * чтение stdout/stderr, timeout, отмену и освобождение ресурсов. Локальные
- * Git-операции и workflow-логику не выполняет.</p>
+ * <p>Инкапсулирует создание процесса, передачу роли через системный промпт и
+ * скилы, задачу через аргументы командной строки ({@code --print} и первый
+ * промпт), параллельное чтение stdout/stderr, timeout, отмену и освобождение
+ * ресурсов. Локальные Git-операции и workflow-логику не выполняет.</p>
  */
 @Component
 public class ProcessAgentRunner implements AgentProcessRunner {
 
 	private final AgentProperties properties;
+	private final RoleResources roleResources;
 	private final UnaryOperator<String> envLookup;
 	private final Map<String, Process> activeProcesses = new ConcurrentHashMap<>();
 	private final Set<String> cancelledRuns = ConcurrentHashMap.newKeySet();
 	private final ExecutorService ioExecutor = Executors.newCachedThreadPool(daemonThreadFactory());
 
 	@Autowired
-	public ProcessAgentRunner(AgentProperties properties) {
-		this(properties, System::getenv);
+	public ProcessAgentRunner(AgentProperties properties, RoleResources roleResources) {
+		this(properties, roleResources, System::getenv);
 	}
 
-	ProcessAgentRunner(AgentProperties properties, UnaryOperator<String> envLookup) {
+	ProcessAgentRunner(AgentProperties properties, RoleResources roleResources, UnaryOperator<String> envLookup) {
 		this.properties = properties;
+		this.roleResources = roleResources;
 		this.envLookup = envLookup;
 	}
 
 	@Override
 	public AgentProcessResult execute(AgentProcessRequest request) {
 		validateExecutable();
+		Path executablePath = resolveExecutable(properties.executable());
 
 		Process process = null;
 		try {
-			ProcessBuilder builder = new ProcessBuilder(buildCommand(request));
+			ProcessBuilder builder = new ProcessBuilder(buildCommand(request, executablePath));
 			builder.directory(request.workingDirectory().toFile());
 			Map<String, String> environment = builder.environment();
 			environment.clear();
-			environment.putAll(resolveEnvironment());
+			environment.putAll(resolveEnvironment(executablePath));
 
 			process = builder.start();
 			activeProcesses.put(request.runId(), process);
 
 			CompletableFuture<String> stdoutFuture = readAsync(process.getInputStream());
 			CompletableFuture<String> stderrFuture = readAsync(process.getErrorStream());
-			writeInput(process, buildPayload(request));
+			closeStdin(process);
 
 			boolean finished = waitForProcess(process, effectiveTimeout(request));
 
@@ -134,18 +139,36 @@ public class ProcessAgentRunner implements AgentProcessRunner {
 		}
 	}
 
-	private List<String> buildCommand(AgentProcessRequest request) {
+	private List<String> buildCommand(AgentProcessRequest request, Path executablePath) {
 		List<String> command = new ArrayList<>();
-		command.add(resolveExecutable(properties.executable()).toString());
+		command.add(executablePath.toString());
 		command.addAll(properties.baseArgs());
-		command.add("--role");
-		command.add(request.role());
-		command.add("--run-id");
-		command.add(request.runId());
-		request.parameters().entrySet().stream()
-				.sorted(Map.Entry.comparingByKey())
-				.forEach(entry -> command.add("--" + entry.getKey() + "=" + entry.getValue()));
+		command.add("--print");
+		command.add("--append-system-prompt");
+		command.add(roleResources.systemPromptFile(request.role()).toString());
+		command.add("--skill");
+		command.add(roleResources.skillsDirectory(request.role()).toString());
+		command.add("--");
+		command.add(buildMessage(request));
 		return command;
+	}
+
+	private String buildMessage(AgentProcessRequest request) {
+		StringBuilder message = new StringBuilder();
+		appendText(message, request.instruction());
+		appendText(message, request.inputData());
+		appendText(message, request.context());
+		return message.toString();
+	}
+
+	private void appendText(StringBuilder message, String text) {
+		if (text == null || text.isBlank()) {
+			return;
+		}
+		if (!message.isEmpty()) {
+			message.append("\n\n");
+		}
+		message.append(text);
 	}
 
 	private Path resolveExecutable(String executable) {
@@ -165,10 +188,11 @@ public class ProcessAgentRunner implements AgentProcessRunner {
 				}
 			}
 		}
-		return path;
+		throw AgentProcessException.launch(
+				"agent executable not found in PATH: " + executable + "; set agent.executable to an absolute path", null);
 	}
 
-	private Map<String, String> resolveEnvironment() {
+	private Map<String, String> resolveEnvironment(Path executablePath) {
 		Map<String, String> environment = new HashMap<>();
 		for (String name : properties.allowedEnvironmentVariables()) {
 			String value = envLookup.apply(name);
@@ -176,32 +200,20 @@ public class ProcessAgentRunner implements AgentProcessRunner {
 				environment.put(name, value);
 			}
 		}
+		// Каталог исполняемого файла добавляется в PATH, чтобы shebang вида
+		// `#!/usr/bin/env node` мог найти интерпретатор рядом с исполняемым файлом.
+		if (executablePath != null && executablePath.getParent() != null) {
+			String dir = executablePath.getParent().toString();
+			String existingPath = environment.get("PATH");
+			environment.put("PATH", existingPath == null || existingPath.isBlank()
+					? dir : dir + File.pathSeparator + existingPath);
+		}
 		return environment;
 	}
 
-	private String buildPayload(AgentProcessRequest request) {
-		StringBuilder payload = new StringBuilder();
-		String profile = properties.profiles().get(request.role());
-		if (profile != null && !profile.isBlank()) {
-			payload.append(profile).append('\n');
-		}
-		if (request.instruction() != null) {
-			payload.append(request.instruction()).append('\n');
-		}
-		if (request.inputData() != null) {
-			payload.append(request.inputData()).append('\n');
-		}
-		if (request.context() != null) {
-			payload.append(request.context()).append('\n');
-		}
-		return payload.toString();
-	}
-
-	private void writeInput(Process process, String payload) throws IOException {
+	private void closeStdin(Process process) throws IOException {
 		try (var stdin = process.getOutputStream()) {
-			if (!payload.isEmpty()) {
-				stdin.write(payload.getBytes(StandardCharsets.UTF_8));
-			}
+			// stdin закрывается без payload: задача передаётся аргументами командной строки.
 		}
 	}
 

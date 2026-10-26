@@ -2,6 +2,7 @@ package com.hydroyura.agents.piflow.workspace.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -42,6 +43,7 @@ class WorkspaceServiceTest {
 		WorkspaceLayout layout = new PropertiesWorkspaceLayout(
 				new WorkspaceProperties(tempDir.resolve("ws"), tempDir.resolve("locks"), Duration.ofMinutes(1)));
 		service = new WorkspaceService(localGit, layout);
+		when(localGit.resolveBaseBranch(any(), any())).thenAnswer(inv -> inv.getArgument(1));
 	}
 
 	@Test

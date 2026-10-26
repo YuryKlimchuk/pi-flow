@@ -11,9 +11,14 @@ github:
     read-timeout: ${GITHUB_API_READ_TIMEOUT:30s}
 
 agent:
-  executable: ${AGENT_EXECUTABLE:pi}
+  executable: ${AGENT_EXECUTABLE:/home/yury/.local/share/pi-node/node-v22.22.3-linux-x64/bin/pi}
   base-args: []
-  allowed-environment-variables: []
+  allowed-environment-variables:
+    - PATH
+    - HOME
+    - DEEPSEEK_API_KEY
+    - ANTHROPIC_API_KEY
+    - OPENAI_API_KEY
   default-timeout: ${AGENT_DEFAULT_TIMEOUT:10m}
   profiles: {}
 

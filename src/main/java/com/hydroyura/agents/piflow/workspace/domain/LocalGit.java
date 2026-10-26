@@ -12,6 +12,16 @@ public interface LocalGit {
 
 	void updateToRemote(Path directory, String targetBranch);
 
+	/**
+	 * Возвращает ветку, из которой следует строить рабочую копию: предпочтительную
+	 * ветку, если она существует в удалённом репозитории, иначе {@code main}.
+	 *
+	 * @param repositoryUrl адрес репозитория
+	 * @param preferredBranch предпочтительная ветка (например, {@code master})
+	 * @return фактическая базовая ветка
+	 */
+	String resolveBaseBranch(String repositoryUrl, String preferredBranch);
+
 	boolean isRepository(Path directory);
 
 	boolean isClean(Path directory);
