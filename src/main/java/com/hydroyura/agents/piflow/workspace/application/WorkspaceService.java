@@ -5,6 +5,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import com.hydroyura.agents.piflow.workspace.api.WorkspaceArtifactResult;
+import com.hydroyura.agents.piflow.workspace.api.WorkspaceBranchCommand;
+import com.hydroyura.agents.piflow.workspace.api.WorkspaceBranchResult;
 import com.hydroyura.agents.piflow.workspace.api.WorkspaceException;
 import com.hydroyura.agents.piflow.workspace.api.WorkspaceOperations;
 import com.hydroyura.agents.piflow.workspace.api.WorkspacePreparationRequest;
@@ -71,6 +73,21 @@ public class WorkspaceService implements WorkspaceOperations {
 				throw WorkspaceException.result("design proposal is missing required section: " + heading);
 			}
 		}
+	}
+
+	@Override
+	public WorkspaceBranchResult createBranch(WorkspaceBranchCommand command) {
+		command.validate();
+		Path directory = layout.repositoryDirectory(command.repositoryUrl());
+		if (!localGit.isRepository(directory)) {
+			throw WorkspaceException.corrupt("directory is not a valid git repository: " + directory);
+		}
+		String from = localGit.currentBranch(directory);
+		if (!localGit.branchExists(directory, command.branch())) {
+			localGit.createBranch(directory, command.branch(), from);
+		}
+		localGit.checkout(directory, command.branch());
+		return new WorkspaceBranchResult(directory, command.branch());
 	}
 
 	private WorkspaceArtifactResult readArtifact(String workspacePath, String relativePath) {

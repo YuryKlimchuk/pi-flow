@@ -29,5 +29,8 @@ public record WorkflowState(
 		String branchName,
 		String designText,
 		String errorMessage,
-		List<WorkflowStepInfo> timeline) {
+		List<WorkflowStepInfo> timeline,
+		boolean branchCreated,
+		String commitId,
+		String branchUrl) {
 }

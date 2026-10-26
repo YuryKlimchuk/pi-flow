@@ -45,4 +45,14 @@ public interface WorkflowOperations {
 	 * @return список компактных описаний workflow
 	 */
 	List<WorkflowSummary> listWorkflows();
+
+	/**
+	 * Создаёт итоговую ветку с именем, предложенным Analyst.
+	 */
+	WorkflowState createBranch(CreateBranchCommand command);
+
+	/**
+	 * Коммитит артефакты и публикует ветку в GitHub.
+	 */
+	WorkflowState push(PushWorkflowCommand command);
 }

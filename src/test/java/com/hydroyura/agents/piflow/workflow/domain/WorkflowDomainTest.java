@@ -147,7 +147,7 @@ class WorkflowDomainTest {
 
 		assertThat(workflow.currentStage()).isEqualTo(WorkflowStage.DESIGNING_SOLUTION);
 		assertThat(workflow.analysisText()).isNull();
-		assertThat(workflow.branchName()).isNull();
+		assertThat(workflow.branchName()).isEqualTo("feature/issue-42");
 	}
 
 	@Test

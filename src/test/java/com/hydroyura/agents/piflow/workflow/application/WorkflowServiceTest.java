@@ -33,11 +33,18 @@ class WorkflowServiceTest {
 	@Mock
 	private WorkspaceOperations workspaceOperations;
 
+	@Mock
+	private com.hydroyura.agents.piflow.workspace.api.WorkspaceGitOperations workspaceGitOperations;
+
+	@Mock
+	private com.hydroyura.agents.piflow.github.api.BranchOperations branchOperations;
+
 	private WorkflowService service;
 
 	@BeforeEach
 	void setUp() {
-		service = new WorkflowService(executionPort, new InMemoryWorkflowRepository(), workspaceOperations);
+		service = new WorkflowService(executionPort, new InMemoryWorkflowRepository(), workspaceOperations,
+				workspaceGitOperations, branchOperations);
 	}
 
 	@Test

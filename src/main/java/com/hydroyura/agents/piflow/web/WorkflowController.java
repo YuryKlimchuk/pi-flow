@@ -4,6 +4,8 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
 import com.hydroyura.agents.piflow.workflow.api.ContinueWorkflowCommand;
+import com.hydroyura.agents.piflow.workflow.api.CreateBranchCommand;
+import com.hydroyura.agents.piflow.workflow.api.PushWorkflowCommand;
 import com.hydroyura.agents.piflow.workflow.api.ReworkWorkflowCommand;
 import com.hydroyura.agents.piflow.workflow.api.StartWorkflowCommand;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowException;
@@ -83,6 +85,32 @@ public class WorkflowController {
 			@RequestParam("feedback") String feedback, Model model) {
 		try {
 			workflowOperations.rework(new ReworkWorkflowCommand(workflowId, feedback));
+			return "redirect:/workflows/track?workflowId=" + encode(workflowId);
+		} catch (WorkflowException e) {
+			model.addAttribute("workflowId", workflowId);
+			model.addAttribute("state", currentState(workflowId));
+			model.addAttribute("error", message(e));
+			return "workflow-status";
+		}
+	}
+
+	@PostMapping("/workflows/create-branch")
+	public String createBranch(@RequestParam("workflowId") String workflowId, Model model) {
+		try {
+			workflowOperations.createBranch(new CreateBranchCommand(workflowId));
+			return "redirect:/workflows/track?workflowId=" + encode(workflowId);
+		} catch (WorkflowException e) {
+			model.addAttribute("workflowId", workflowId);
+			model.addAttribute("state", currentState(workflowId));
+			model.addAttribute("error", message(e));
+			return "workflow-status";
+		}
+	}
+
+	@PostMapping("/workflows/push")
+	public String push(@RequestParam("workflowId") String workflowId, Model model) {
+		try {
+			workflowOperations.push(new PushWorkflowCommand(workflowId));
 			return "redirect:/workflows/track?workflowId=" + encode(workflowId);
 		} catch (WorkflowException e) {
 			model.addAttribute("workflowId", workflowId);

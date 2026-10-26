@@ -29,6 +29,9 @@ public final class Workflow {
 	private String analysisText;
 	private String designText;
 	private String failureReason;
+	private boolean branchCreated;
+	private String commitId;
+	private String branchUrl;
 
 	private static final Map<WorkflowStage, Set<WorkflowStage>> NEXT_STAGES = nextStages();
 
@@ -99,6 +102,18 @@ public final class Workflow {
 		return failureReason;
 	}
 
+	public boolean branchCreated() {
+		return branchCreated;
+	}
+
+	public String commitId() {
+		return commitId;
+	}
+
+	public String branchUrl() {
+		return branchUrl;
+	}
+
 	/**
 	 * Переводит только что созданный Workflow в состояние исполнения.
 	 */
@@ -135,16 +150,15 @@ public final class Workflow {
 		if (status != WorkflowStatus.WAITING_FOR_USER) {
 			throw new IllegalWorkflowTransitionException("cannot continue from status " + status);
 		}
-		boolean hasAnalysis = currentStage == WorkflowStage.ANALYZING_REQUIREMENTS
-				&& analysisText != null && branchName != null;
-		boolean hasDesign = currentStage == WorkflowStage.DESIGNING_SOLUTION && designText != null;
-		if (!hasAnalysis && !hasDesign) {
-			throw new IllegalWorkflowTransitionException("cannot continue without a recorded result");
+		if (currentStage != WorkflowStage.ANALYZING_REQUIREMENTS) {
+			throw new IllegalWorkflowTransitionException("cannot continue from stage " + currentStage);
+		}
+		if (analysisText == null || branchName == null) {
+			throw new IllegalWorkflowTransitionException("cannot continue without a recorded analysis result");
 		}
 		resume();
 		completeStage();
 		this.analysisText = null;
-		this.branchName = null;
 		this.designText = null;
 	}
 	/**
@@ -161,8 +175,10 @@ public final class Workflow {
 		}
 		resume();
 		this.analysisText = null;
-		this.branchName = null;
 		this.designText = null;
+		if (currentStage == WorkflowStage.ANALYZING_REQUIREMENTS) {
+			this.branchName = null;
+		}
 		appendStep(currentStage.name(), roleForStage(), "REWORK", feedback, null);
 		checkpoints.add(new Checkpoint("rework", feedback == null ? "" : feedback));
 	}
@@ -187,6 +203,37 @@ public final class Workflow {
 		appendStep("DESIGNING_SOLUTION", "ARCHITECT", "DESIGN", designText, null);
 		checkpoints.add(new Checkpoint("design", ""));
 		waitForUser();
+	}
+
+	/**
+	 * Создаёт итоговую ветку после утверждённого proposal Architect.
+	 */
+	public void createBranch() {
+		if (status != WorkflowStatus.WAITING_FOR_USER) {
+			throw new IllegalWorkflowTransitionException("cannot create branch from status " + status);
+		}
+		if (currentStage != WorkflowStage.DESIGNING_SOLUTION) {
+			throw new IllegalWorkflowTransitionException("cannot create branch from stage " + currentStage);
+		}
+		if (designText == null) {
+			throw new IllegalWorkflowTransitionException("cannot create branch without an approved proposal");
+		}
+		this.branchCreated = true;
+		this.designText = null;
+		checkpoints.add(new Checkpoint("branch", branchName == null ? "" : branchName));
+	}
+
+	/**
+	 * Фиксирует успешную публикацию ветки и завершает workflow.
+	 */
+	public void push(String commitId, String branchUrl) {
+		if (!branchCreated) {
+			throw new IllegalWorkflowTransitionException("cannot push before branch creation");
+		}
+		this.commitId = commitId;
+		this.branchUrl = branchUrl;
+		this.status = WorkflowStatus.COMPLETED;
+		checkpoints.add(new Checkpoint("push", branchUrl == null ? "" : branchUrl));
 	}
 
 	/**

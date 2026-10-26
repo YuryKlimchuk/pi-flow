@@ -30,4 +30,12 @@ public interface WorkspaceOperations {
 	 * @return текст и метаданные артефакта
 	 */
 	WorkspaceArtifactResult readDesignArtifact(String workspacePath);
+
+	/**
+	 * Создаёт (или переключается на) итоговую ветку в подготовленном workspace.
+	 *
+	 * @param command параметры ветки
+	 * @return результат с путём и именем ветки
+	 */
+	WorkspaceBranchResult createBranch(WorkspaceBranchCommand command);
 }

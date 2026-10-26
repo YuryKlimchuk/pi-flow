@@ -68,14 +68,13 @@
         </div>
     </div>
 
-    <div th:if="${state != null && state.designText != null}" class="card border-success">
+    <div th:if="${state != null && state.designText != null}" class="card border-success mb-3">
         <div class="card-body">
             <h5 class="card-title text-success">Проектирование завершено — proposal</h5>
             <pre class="bg-white border rounded p-3" th:text="${state.designText}"></pre>
-            <form th:action="@{/workflows/continue}" method="post" class="d-inline">
+            <form th:action="@{/workflows/create-branch}" method="post" class="d-inline">
                 <input type="hidden" name="workflowId" th:value="${state.workflowId}">
-                <input type="hidden" name="branchName" th:value="${state.branchName}">
-                <button type="submit" class="btn btn-primary">Продолжить</button>
+                <button type="submit" class="btn btn-primary">Создать ветку</button>
             </form>
             <details class="d-inline ms-2">
                 <summary class="btn btn-outline-secondary">Исправить</summary>
@@ -85,6 +84,29 @@
                     <button type="submit" class="btn btn-primary mt-2">Отправить замечания</button>
                 </form>
             </details>
+        </div>
+    </div>
+
+    <div th:if="${state != null && state.branchCreated && state.commitId == null}" class="card border-info mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Ветка создана</h5>
+            <code th:text="${state.branchName}"></code>
+            <form th:action="@{/workflows/push}" method="post" class="mt-2">
+                <input type="hidden" name="workflowId" th:value="${state.workflowId}">
+                <button type="submit" class="btn btn-primary">Запушить изменения</button>
+            </form>
+        </div>
+    </div>
+
+    <div th:if="${state != null && state.status.name() == 'COMPLETED'}" class="card border-success">
+        <div class="card-body">
+            <h5 class="card-title text-success">Workflow завершён</h5>
+            <dl class="row mb-0">
+                <dt class="col-sm-3">Commit</dt>
+                <dd class="col-sm-9"><code th:text="${state.commitId}"></code></dd>
+                <dt class="col-sm-3">Ветка</dt>
+                <dd class="col-sm-9"><a th:href="${state.branchUrl}" th:text="${state.branchUrl}"></a></dd>
+            </dl>
         </div>
     </div>
 </main>
