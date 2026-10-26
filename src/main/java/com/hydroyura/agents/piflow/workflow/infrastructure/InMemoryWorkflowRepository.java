@@ -29,4 +29,9 @@ public class InMemoryWorkflowRepository implements WorkflowRepository {
 	public Optional<Workflow> findById(WorkflowId id) {
 		return Optional.ofNullable(store.get(id));
 	}
+
+	@Override
+	public java.util.List<Workflow> findAll() {
+		return new java.util.ArrayList<>(store.values());
+	}
 }

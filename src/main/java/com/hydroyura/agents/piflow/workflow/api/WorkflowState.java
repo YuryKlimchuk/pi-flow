@@ -28,5 +28,6 @@ public record WorkflowState(
 		String analysisText,
 		String branchName,
 		String designText,
-		String errorMessage) {
+		String errorMessage,
+		List<WorkflowStepInfo> timeline) {
 }

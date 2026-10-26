@@ -1,5 +1,7 @@
 package com.hydroyura.agents.piflow.workflow.api;
 
+import java.util.List;
+
 /**
  * Публичный порт запуска и чтения состояния Workflow.
  */
@@ -36,4 +38,11 @@ public interface WorkflowOperations {
 	 * @return публичное состояние после возврата к анализу
 	 */
 	WorkflowState rework(ReworkWorkflowCommand command);
+
+	/**
+	 * Возвращает список запущенных workflow.
+	 *
+	 * @return список компактных описаний workflow
+	 */
+	List<WorkflowSummary> listWorkflows();
 }

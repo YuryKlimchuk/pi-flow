@@ -273,6 +273,6 @@ class WebPagesMvcTest {
 	private WorkflowState state(WorkflowStatus status, WorkflowStage stage, String analysisText, String branchName,
 			String errorMessage) {
 		return new WorkflowState("wf-1", "https://github.com/acme/demo.git", 42, status, stage, List.of(), "exec-1",
-				analysisText, branchName, null, errorMessage);
+				analysisText, branchName, null, errorMessage, List.of());
 	}
 }

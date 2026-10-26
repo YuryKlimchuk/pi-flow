@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Запущенные Workflow')}"></head>
+<body class="bg-light">
+<header th:replace="~{fragments :: header}"></header>
+<main class="container py-4">
+    <h2 class="mb-3">Запущенные Workflow</h2>
+
+    <div th:if="${workflows == null || workflows.isEmpty()}" class="text-muted">
+        Нет запущенных workflow.
+    </div>
+
+    <div class="table-responsive" th:if="${workflows != null && !workflows.isEmpty()}">
+        <table class="table table-hover align-middle">
+            <thead>
+            <tr>
+                <th>Workflow ID</th>
+                <th>Репозиторий</th>
+                <th>Issue</th>
+                <th>Статус</th>
+                <th>Этап</th>
+                <th></th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="w : ${workflows}">
+                <td><code th:text="${w.workflowId}"></code></td>
+                <td th:text="${w.repositoryUrl}"></td>
+                <td th:text="${w.issueNumber}"></td>
+                <td th:text="${w.status}"></td>
+                <td th:text="${w.stage}"></td>
+                <td>
+                    <a class="btn btn-sm btn-outline-primary"
+                       th:href="@{/workflows/track(workflowId=${w.workflowId})}">Открыть</a>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+</main>
+<script th:replace="~{fragments :: scripts}"></script>
+</body>
+</html>

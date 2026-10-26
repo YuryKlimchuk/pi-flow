@@ -40,7 +40,7 @@ Infrastructure-адаптер SHALL управлять одним длитель
 - **THEN** все операции используют один и тот же workflow id, а адаптер посылает signals/query вместо запуска отдельных execution
 
 ### Requirement: Минимальный сквозной сценарий
-Application-сценарий SHALL создавать один Workflow и инициировать один длительный Temporal execution; preparation SHALL предшествовать Analyst, а команды пользователя SHALL продвигать этапы через signals без новых execution.
+Application-сценарий SHALL создавать один Workflow и инициировать один длительный Temporal execution; preparation SHALL предшествовать Analyst, а команды пользователя SHALL продвигать этапы через signals без новых execution, при этом каждый завершённый запуск SHALL быть представлен в timeline своим runId.
 
 #### Scenario: Успешный запуск
 - **WHEN** валидная команда запуска передана при доступных workspace, agent и Temporal
@@ -60,7 +60,7 @@ Application-сценарий SHALL создавать один Workflow и ин�
 
 #### Scenario: Gate Analyst
 - **WHEN** Analyst завершается успешно и артефакт валиден
-- **THEN** execution переходит в `WAITING_FOR_USER` и ждёт signal `continueStage` или `reworkStage`
+- **THEN** execution переходит в `WAITING_FOR_USER`, а состояние содержит результат шага и идентификатор запуска
 
 #### Scenario: Ошибка анализа
 - **WHEN** Analyst завершается ошибкой или возвращает невалидный результат
@@ -68,11 +68,11 @@ Application-сценарий SHALL создавать один Workflow и ин�
 
 #### Scenario: Продолжение
 - **WHEN** публичная команда продолжения принята на ручном gate
-- **THEN** тот же execution запускает следующий этап, а состояние больше не сообщает анализ как единственный текущий этап
+- **THEN** тот же execution запускает следующий этап, состояние сохраняет завершённый результат в timeline и больше не сообщает его как единственный текущий этап
 
 #### Scenario: Rework
 - **WHEN** публичная команда rework с feedback принята на ручном gate
-- **THEN** тот же execution повторяет текущий этап с feedback, не создавая новый workflow id
+- **THEN** тот же execution повторяет текущий этап, а новый результат получает отдельный runId в timeline
 
 ### Requirement: Подготовка workspace в Temporal activity
 Temporal execution SHALL выполнять `workspace.prepare` внутри preparation activity до analysis activity и SHALL передавать результат подготовки в следующую activity.
@@ -86,7 +86,7 @@ Temporal execution SHALL выполнять `workspace.prepare` внутри pre
 - **THEN** preparation activity завершается ошибкой, analysis activity не запускается и Temporal execution не возвращает успешный результат
 
 ### Requirement: Изоляция Temporal
-Доменный слой и `workflow.api` SHALL NOT зависеть от пакетов Temporal, Spring, Temporal-конфигурации или `workflow.infrastructure`.
+Доменный слой и `workflow.api` SHALL NOT зависеть от пакетов Temporal, Spring, Temporal-конфигурации или `workflow.infrastructure`, включая публичную модель timeline.
 
 #### Scenario: Архитектурная проверка
 - **WHEN** анализируются зависимости классов domain и api

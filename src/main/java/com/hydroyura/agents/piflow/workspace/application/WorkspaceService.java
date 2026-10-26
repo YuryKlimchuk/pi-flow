@@ -60,7 +60,17 @@ public class WorkspaceService implements WorkspaceOperations {
 
 	@Override
 	public WorkspaceArtifactResult readDesignArtifact(String workspacePath) {
-		return readArtifact(workspacePath, ".pi-flow/design/architect.md");
+		WorkspaceArtifactResult result = readArtifact(workspacePath, ".pi-flow/design/architect.md");
+		validateProposal(result.text());
+		return result;
+	}
+
+	private void validateProposal(String text) {
+		for (String heading : java.util.List.of("## Why", "## What Changes", "## Capabilities", "## Impact", "## Non-goals")) {
+			if (!text.contains(heading)) {
+				throw WorkspaceException.result("design proposal is missing required section: " + heading);
+			}
+		}
 	}
 
 	private WorkspaceArtifactResult readArtifact(String workspacePath, String relativePath) {

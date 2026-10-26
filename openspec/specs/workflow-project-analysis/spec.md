@@ -81,3 +81,14 @@ Analysis activity SHALL использовать один и тот же пут�
 #### Scenario: Невалидный новый branch
 - **WHEN** повторный Analyst записывает кириллическое или иначе недопустимое имя
 - **THEN** повторный анализ завершается ошибкой и старое успешное состояние не публикуется как новый результат
+
+### Requirement: Результат проектирования как proposal
+Успешный Architect SHALL создавать в workspace непустой читаемый proposal-артефакт с обязательными разделами `Why`, `What Changes`, `Capabilities`, `Impact` и `Non-goals`, а workspace SHALL возвращать его полный Markdown через публичную операцию.
+
+#### Scenario: Валидный Architect proposal
+- **WHEN** Architect завершён успешно и файл содержит все обязательные непустые разделы
+- **THEN** workspace возвращает Markdown proposal, а workflow может опубликовать его как успешный результат
+
+#### Scenario: Невалидный Architect proposal
+- **WHEN** файл Architect отсутствует, пуст или не содержит обязательный раздел
+- **THEN** workspace возвращает типизированную ошибку валидации и workflow не публикует успешный proposal

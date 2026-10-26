@@ -23,6 +23,7 @@ public final class Workflow {
 	private WorkflowStage currentStage;
 	private final List<WorkflowStage> completedStages = new ArrayList<>();
 	private final List<Checkpoint> checkpoints = new ArrayList<>();
+	private final List<CompletedWorkflowStep> timeline = new ArrayList<>();
 	private String executionId;
 	private String branchName;
 	private String analysisText;
@@ -70,6 +71,14 @@ public final class Workflow {
 		return Collections.unmodifiableList(checkpoints);
 	}
 
+	public List<CompletedWorkflowStep> timeline() {
+		return Collections.unmodifiableList(timeline);
+	}
+
+	public void appendStep(String stage, String role, String action, String result, String runId) {
+		timeline.add(new CompletedWorkflowStep(stage, role, action, result, runId));
+	}
+
 	public String executionId() {
 		return executionId;
 	}
@@ -114,6 +123,7 @@ public final class Workflow {
 		}
 		this.branchName = branchName;
 		this.analysisText = analysisText;
+		appendStep("ANALYZING_REQUIREMENTS", "ANALYST", "ANALYZE", analysisText, null);
 		checkpoints.add(new Checkpoint("analysis", branchName == null ? "" : branchName));
 		waitForUser();
 	}
@@ -137,7 +147,6 @@ public final class Workflow {
 		this.branchName = null;
 		this.designText = null;
 	}
-
 	/**
 	 * Возвращает Workflow к анализу для повторного запуска с замечаниями.
 	 *
@@ -154,9 +163,17 @@ public final class Workflow {
 		this.analysisText = null;
 		this.branchName = null;
 		this.designText = null;
+		appendStep(currentStage.name(), roleForStage(), "REWORK", feedback, null);
 		checkpoints.add(new Checkpoint("rework", feedback == null ? "" : feedback));
 	}
 
+	private String roleForStage() {
+		return switch (currentStage) {
+			case ANALYZING_REQUIREMENTS -> "ANALYST";
+			case DESIGNING_SOLUTION -> "ARCHITECT";
+			default -> currentStage.name();
+		};
+	}
 	/**
 	 * Фиксирует результат проектирования Architect.
 	 *
@@ -167,6 +184,7 @@ public final class Workflow {
 			throw new IllegalWorkflowTransitionException("cannot record design from stage " + currentStage);
 		}
 		this.designText = designText;
+		appendStep("DESIGNING_SOLUTION", "ARCHITECT", "DESIGN", designText, null);
 		checkpoints.add(new Checkpoint("design", ""));
 		waitForUser();
 	}

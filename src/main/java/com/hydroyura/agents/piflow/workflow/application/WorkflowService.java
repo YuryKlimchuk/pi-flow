@@ -100,6 +100,18 @@ public class WorkflowService implements WorkflowOperations {
 		return toState(workflow);
 	}
 
+	@Override
+	public java.util.List<com.hydroyura.agents.piflow.workflow.api.WorkflowSummary> listWorkflows() {
+		return repository.findAll().stream()
+				.map(w -> new com.hydroyura.agents.piflow.workflow.api.WorkflowSummary(
+						w.id().value(),
+						w.context().repositoryUrl(),
+						w.context().issueNumber(),
+						w.status().name(),
+						w.currentStage().name()))
+				.toList();
+	}
+
 	private void syncExecution(Workflow workflow) {
 		if (workflow.executionId() == null
 				|| workflow.status() == com.hydroyura.agents.piflow.workflow.domain.WorkflowStatus.FAILED) {
@@ -138,6 +150,11 @@ public class WorkflowService implements WorkflowOperations {
 		for (com.hydroyura.agents.piflow.workflow.domain.WorkflowStage stage : workflow.completedStages()) {
 			completed.add(WorkflowStage.valueOf(stage.name()));
 		}
+		List<com.hydroyura.agents.piflow.workflow.api.WorkflowStepInfo> timeline = new ArrayList<>();
+		for (com.hydroyura.agents.piflow.workflow.domain.CompletedWorkflowStep step : workflow.timeline()) {
+			timeline.add(new com.hydroyura.agents.piflow.workflow.api.WorkflowStepInfo(
+					step.stage(), step.role(), step.action(), step.result(), step.runId()));
+		}
 		return new WorkflowState(
 				workflow.id().value(),
 				workflow.context().repositoryUrl(),
@@ -149,6 +166,7 @@ public class WorkflowService implements WorkflowOperations {
 				workflow.analysisText(),
 				workflow.branchName(),
 				workflow.designText(),
-				workflow.failureReason());
+				workflow.failureReason(),
+				List.copyOf(timeline));
 	}
 }

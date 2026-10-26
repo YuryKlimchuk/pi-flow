@@ -13,4 +13,6 @@ public interface WorkflowRepository {
 	void save(Workflow workflow);
 
 	Optional<Workflow> findById(WorkflowId id);
+
+	java.util.List<Workflow> findAll();
 }

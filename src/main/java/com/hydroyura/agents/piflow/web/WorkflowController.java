@@ -51,6 +51,12 @@ public class WorkflowController {
 		}
 	}
 
+	@GetMapping("/workflows")
+	public String list(Model model) {
+		model.addAttribute("workflows", workflowOperations.listWorkflows());
+		return "workflow-list";
+	}
+
 	@GetMapping("/workflows/track")
 	public String track(@RequestParam("workflowId") String workflowId, Model model) {
 		model.addAttribute("workflowId", workflowId);

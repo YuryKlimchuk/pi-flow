@@ -6,7 +6,10 @@
 <main class="container py-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2 class="mb-0">Отслеживание Workflow</h2>
-        <a class="btn btn-outline-secondary btn-sm" th:href="@{/repositories}">← К репозиториям</a>
+        <div>
+            <a class="btn btn-outline-secondary btn-sm" th:href="@{/workflows}">← Все workflow</a>
+            <a class="btn btn-outline-secondary btn-sm" th:href="@{/repositories}">← Репозитории</a>
+        </div>
     </div>
 
     <p class="text-muted">Workflow ID: <code th:text="${workflowId}"></code></p>
@@ -20,64 +23,68 @@
         <p th:text="${state.errorMessage}" class="mb-0"></p>
     </div>
 
-    <div th:if="${state != null && state.status.name() != 'FAILED' && state.analysisText == null && state.currentStage.name() == 'ANALYZING_REQUIREMENTS'}" class="card">
+    <div th:if="${state != null && state.timeline != null}" class="mb-4">
+        <h5>Выполненные шаги</h5>
+        <div class="card mb-2" th:each="step : ${state.timeline}">
+            <div class="card-body py-2">
+                <span class="badge bg-secondary" th:text="${step.role}"></span>
+                <span class="badge bg-light text-dark" th:text="${step.action}"></span>
+                <span class="text-muted small ms-2" th:text="${step.stage}"></span>
+                <pre class="bg-white border rounded p-2 mt-2 mb-0" th:text="${step.result}"></pre>
+            </div>
+        </div>
+    </div>
+
+    <div th:if="${state != null && state.status.name() != 'FAILED' && state.analysisText == null && state.designText == null}" class="card">
         <div class="card-body text-center py-5">
             <div class="spinner-border text-primary" role="status">
                 <span class="visually-hidden">Выполняется…</span>
             </div>
-            <p class="mt-3 mb-0">Анализ задачи выполняется…</p>
+            <p class="mt-3 mb-0" th:text="${state.currentStage.name() == 'DESIGNING_SOLUTION'} ? 'Проектирование решения выполняется…' : 'Анализ задачи выполняется…'"></p>
         </div>
     </div>
 
-    <div th:if="${state != null && state.analysisText != null && state.currentStage.name() == 'ANALYZING_REQUIREMENTS'}" class="card border-success">
+    <div th:if="${state != null && state.analysisText != null}" class="card border-success mb-3">
         <div class="card-body">
             <h5 class="card-title text-success">Анализ завершён — ожидание вашего решения</h5>
-            <dl class="row">
-                <dt class="col-sm-3">Репозиторий</dt>
-                <dd class="col-sm-9" th:text="${state.repositoryUrl}"></dd>
-                <dt class="col-sm-3">Issue</dt>
-                <dd class="col-sm-9" th:text="${state.issueNumber}"></dd>
+            <dl class="row mb-2">
                 <dt class="col-sm-3">Предложенная ветка</dt>
                 <dd class="col-sm-9"><code th:text="${state.branchName}"></code></dd>
             </dl>
-
-            <h6 class="mt-3">Результат анализа</h6>
             <pre class="bg-white border rounded p-3" th:text="${state.analysisText}"></pre>
-
             <form th:action="@{/workflows/continue}" method="post" class="d-inline">
                 <input type="hidden" name="workflowId" th:value="${state.workflowId}">
                 <input type="hidden" name="branchName" th:value="${state.branchName}">
                 <button type="submit" class="btn btn-primary">Продолжить</button>
             </form>
-
             <details class="d-inline ms-2">
                 <summary class="btn btn-outline-secondary">Исправить</summary>
                 <form th:action="@{/workflows/rework}" method="post" class="mt-2">
                     <input type="hidden" name="workflowId" th:value="${state.workflowId}">
-                    <div class="mb-2">
-                        <label class="form-label">Ваши замечания</label>
-                        <textarea class="form-control" name="feedback" rows="4" required></textarea>
-                    </div>
-                    <button type="submit" class="btn btn-primary">Отправить замечания</button>
+                    <textarea class="form-control" name="feedback" rows="3" required></textarea>
+                    <button type="submit" class="btn btn-primary mt-2">Отправить замечания</button>
                 </form>
             </details>
         </div>
     </div>
 
-    <div th:if="${state != null && state.currentStage.name() == 'DESIGNING_SOLUTION' && state.designText == null}" class="card">
-        <div class="card-body text-center py-5">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Выполняется…</span>
-            </div>
-            <p class="mt-3 mb-0">Проектирование решения выполняется…</p>
-        </div>
-    </div>
-
     <div th:if="${state != null && state.designText != null}" class="card border-success">
         <div class="card-body">
-            <h5 class="card-title text-success">Проектирование завершено</h5>
-            <h6 class="mt-3">Проектное решение</h6>
+            <h5 class="card-title text-success">Проектирование завершено — proposal</h5>
             <pre class="bg-white border rounded p-3" th:text="${state.designText}"></pre>
+            <form th:action="@{/workflows/continue}" method="post" class="d-inline">
+                <input type="hidden" name="workflowId" th:value="${state.workflowId}">
+                <input type="hidden" name="branchName" th:value="${state.branchName}">
+                <button type="submit" class="btn btn-primary">Продолжить</button>
+            </form>
+            <details class="d-inline ms-2">
+                <summary class="btn btn-outline-secondary">Исправить</summary>
+                <form th:action="@{/workflows/rework}" method="post" class="mt-2">
+                    <input type="hidden" name="workflowId" th:value="${state.workflowId}">
+                    <textarea class="form-control" name="feedback" rows="3" required></textarea>
+                    <button type="submit" class="btn btn-primary mt-2">Отправить замечания</button>
+                </form>
+            </details>
         </div>
     </div>
 </main>
