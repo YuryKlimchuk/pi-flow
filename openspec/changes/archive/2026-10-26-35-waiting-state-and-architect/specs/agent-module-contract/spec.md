@@ -3,11 +3,19 @@
 ## MODIFIED Requirements
 
 ### Requirement: Входная модель запуска
-Команда запуска SHALL содержать роль или профиль, инструкцию, входные данные и параметры запуска, необходимые для одного изолированного запуска; `ARCHITECT` SHALL поддерживаться тем же контрактом, что и `ANALYST`.
+Команда запуска SHALL поддерживать необязательный пользовательский feedback и роль `ARCHITECT` тем же контрактом, что и `ANALYST`.
 
 #### Scenario: Переданы все входные данные
 - **WHEN** команда содержит `role`, `instruction`, `inputData` и параметры
 - **THEN** каждый элемент доступен application-слою без чтения его из workflow-состояния
+
+#### Scenario: Feedback передан
+- **WHEN** workflow запускает Analyst с feedback
+- **THEN** `agent.api` предоставляет feedback application-слою процесса как отдельное значение входной команды
+
+#### Scenario: Feedback отсутствует
+- **WHEN** workflow запускает первый анализ без feedback
+- **THEN** команда остаётся валидной и Analyst запускается без пользовательских замечаний
 
 #### Scenario: Передан Architect
 - **WHEN** workflow передаёт роль `ARCHITECT`, инструкцию, Issue-контекст и workspace

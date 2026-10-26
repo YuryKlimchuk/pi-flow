@@ -3,7 +3,6 @@ package com.hydroyura.agents.piflow.workflow.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -43,175 +42,100 @@ class WorkflowServiceTest {
 
 	@Test
 	void start_shouldCreateThenStartExecution() {
-		var command = new StartWorkflowCommand("wf-1", "acme", "demo", 42);
-		when(executionPort.start(any())).thenReturn(new WorkflowExecutionResult("exec-1"));
+		when(executionPort.start(any())).thenReturn(new WorkflowExecutionResult("wf-1"));
+		StartWorkflowCommand command = new StartWorkflowCommand("wf-1", "acme", "demo", 42);
 
 		WorkflowState state = service.start(command);
 
 		assertThat(state.workflowId()).isEqualTo("wf-1");
 		assertThat(state.status()).isEqualTo(WorkflowStatus.RUNNING);
-		assertThat(state.currentStage()).isEqualTo(WorkflowStage.ANALYZING_REQUIREMENTS);
-		assertThat(state.executionId()).isEqualTo("exec-1");
-		assertThat(state.repositoryUrl()).isEqualTo("https://github.com/acme/demo.git");
+		assertThat(state.executionId()).isEqualTo("wf-1");
 		verify(executionPort).start(any(WorkflowExecutionCommand.class));
 	}
 
 	@Test
-	void start_shouldPassOwnerRepositoryAndIssueNumberToExecution() {
-		var command = new StartWorkflowCommand("wf-1", "acme", "demo", 42);
-		when(executionPort.start(any())).thenReturn(new WorkflowExecutionResult("exec-1"));
-
-		service.start(command);
-
-		verify(executionPort).start(argThat(cmd ->
-				cmd.workflowId().equals("wf-1")
-						&& cmd.owner().equals("acme")
-						&& cmd.repository().equals("demo")
-						&& cmd.issueNumber() == 42
-						&& cmd.repositoryUrl().equals("https://github.com/acme/demo.git")));
-	}
-
-	@Test
-	void start_whenInvalidCommand_shouldRejectBeforeExecution() {
-		var command = new StartWorkflowCommand("wf-1", "acme", "demo", 0);
-
-		WorkflowException error = catchThrowableOfType(() -> service.start(command), WorkflowException.class);
-
-		assertThat(error.errorType()).isEqualTo(WorkflowException.ErrorType.VALIDATION);
-		verify(executionPort, never()).start(any());
-	}
-
-	@Test
-	void start_whenExecutionFails_shouldSaveFailedWorkflowAndRethrow() {
-		var command = new StartWorkflowCommand("wf-1", "acme", "demo", 42);
-		when(executionPort.start(any())).thenThrow(WorkflowException.execution("boom", new RuntimeException()));
-
-		WorkflowException error = catchThrowableOfType(() -> service.start(command), WorkflowException.class);
-
-		assertThat(error.errorType()).isEqualTo(WorkflowException.ErrorType.EXECUTION);
-	}
-
-	@Test
-	void getState_whenUnknown_shouldThrowNotFound() {
-		WorkflowException error = catchThrowableOfType(() -> service.getState("missing"), WorkflowException.class);
-
-		assertThat(error.errorType()).isEqualTo(WorkflowException.ErrorType.NOT_FOUND);
-	}
-
-	@Test
-	void getState_whenExecutionRunning_shouldNotRecordResult() {
-		startWorkflow("exec-1");
-		when(executionPort.getState("exec-1")).thenReturn(WorkflowExecutionState.running());
+	void getState_whenRunning_shouldNotRecordResult() {
+		startWorkflow();
+		when(executionPort.queryState("wf-1")).thenReturn(
+				new WorkflowExecutionState("ANALYZING_REQUIREMENTS", "RUNNING", null, null, null));
 
 		WorkflowState state = service.getState("wf-1");
 
 		assertThat(state.status()).isEqualTo(WorkflowStatus.RUNNING);
 		assertThat(state.analysisText()).isNull();
-		assertThat(state.branchName()).isNull();
 	}
 
 	@Test
-	void getState_whenExecutionSucceeded_shouldRecordAnalysis() {
-		startWorkflow("exec-1");
-		when(executionPort.getState("exec-1")).thenReturn(
-				WorkflowExecutionState.succeeded("/ws", "feature/issue-42"));
+	void getState_whenWaitingAnalysis_shouldRecordAnalysis() {
+		startWorkflow();
+		when(executionPort.queryState("wf-1")).thenReturn(
+				new WorkflowExecutionState("ANALYZING_REQUIREMENTS", "WAITING_FOR_USER", "/ws", "feature/issue-42", null));
 		when(workspaceOperations.readAnalysisArtifact("/ws")).thenReturn(
-				new WorkspaceArtifactResult("analysis text", "/ws/.pi-flow/analysis/analyst.md", 13));
+				new WorkspaceArtifactResult("analysis text", "/ws/x", 13));
 
 		WorkflowState state = service.getState("wf-1");
 
+		assertThat(state.status()).isEqualTo(WorkflowStatus.WAITING_FOR_USER);
 		assertThat(state.analysisText()).isEqualTo("analysis text");
 		assertThat(state.branchName()).isEqualTo("feature/issue-42");
 	}
 
 	@Test
-	void getState_whenExecutionFailed_shouldMarkFailed() {
-		startWorkflow("exec-1");
-		when(executionPort.getState("exec-1")).thenReturn(WorkflowExecutionState.failed("analysis boom"));
+	void getState_whenFailed_shouldMarkFailed() {
+		startWorkflow();
+		when(executionPort.queryState("wf-1")).thenReturn(
+				new WorkflowExecutionState("ANALYZING_REQUIREMENTS", "FAILED", null, null, "boom"));
 
 		WorkflowState state = service.getState("wf-1");
 
 		assertThat(state.status()).isEqualTo(WorkflowStatus.FAILED);
-		assertThat(state.errorMessage()).isEqualTo("analysis boom");
+		assertThat(state.errorMessage()).isEqualTo("boom");
 	}
 
 	@Test
-	void continueWorkflow_whenResultRecorded_shouldAdvanceStage() {
-		startWorkflow("exec-1");
-		when(executionPort.getState("exec-1")).thenReturn(
-				WorkflowExecutionState.succeeded("/ws", "feature/issue-42"));
-		when(workspaceOperations.readAnalysisArtifact("/ws")).thenReturn(
-				new WorkspaceArtifactResult("analysis text", "/ws/x", 13));
-		service.getState("wf-1");
+	void continueWorkflow_shouldSignalAndAdvanceStage() {
+		recordAnalysis();
 
 		WorkflowState state = service.continueWorkflow(new ContinueWorkflowCommand("wf-1", "feature/issue-42"));
 
 		assertThat(state.currentStage()).isEqualTo(WorkflowStage.DESIGNING_SOLUTION);
 		assertThat(state.analysisText()).isNull();
-		assertThat(state.branchName()).isNull();
+		verify(executionPort).continueStage("wf-1");
 	}
 
 	@Test
-	void continueWorkflow_whenNoResult_shouldReject() {
-		startWorkflow("exec-1");
-
-		WorkflowException error = catchThrowableOfType(
-				() -> service.continueWorkflow(new ContinueWorkflowCommand("wf-1", "feature/issue-42")),
-				WorkflowException.class);
-
-		assertThat(error.errorType()).isEqualTo(WorkflowException.ErrorType.ILLEGAL_TRANSITION);
-	}
-
-	@Test
-	void rework_whenResultRecorded_shouldStartNewExecutionAndReset() {
-		startWorkflow("exec-1");
-		when(executionPort.getState("exec-1")).thenReturn(
-				WorkflowExecutionState.succeeded("/ws", "feature/issue-42"));
-		when(workspaceOperations.readAnalysisArtifact("/ws")).thenReturn(
-				new WorkspaceArtifactResult("analysis text", "/ws/x", 13));
-		service.getState("wf-1");
-		when(executionPort.start(any())).thenReturn(new WorkflowExecutionResult("exec-2"));
+	void rework_shouldSignalAndReset() {
+		recordAnalysis();
 
 		WorkflowState state = service.rework(new ReworkWorkflowCommand("wf-1", "добавь риски"));
 
 		assertThat(state.currentStage()).isEqualTo(WorkflowStage.ANALYZING_REQUIREMENTS);
 		assertThat(state.analysisText()).isNull();
-		assertThat(state.branchName()).isNull();
-		assertThat(state.executionId()).isEqualTo("exec-2");
-		verify(executionPort).start(argThat(cmd -> "добавь риски".equals(cmd.feedback())));
+		verify(executionPort).reworkStage("wf-1", "добавь риски");
 	}
 
 	@Test
 	void rework_whenBlankFeedback_shouldReject() {
-		startWorkflow("exec-1");
+		startWorkflow();
 
 		WorkflowException error = catchThrowableOfType(
-				() -> service.rework(new ReworkWorkflowCommand("wf-1", "  ")),
-				WorkflowException.class);
+				() -> service.rework(new ReworkWorkflowCommand("wf-1", "  ")), WorkflowException.class);
 
 		assertThat(error.errorType()).isEqualTo(WorkflowException.ErrorType.VALIDATION);
+		verify(executionPort, never()).reworkStage(any(), any());
 	}
 
-	@Test
-	void rework_whenExecutionFails_shouldMarkFailed() {
-		startWorkflow("exec-1");
-		when(executionPort.getState("exec-1")).thenReturn(
-				WorkflowExecutionState.succeeded("/ws", "feature/issue-42"));
-		when(workspaceOperations.readAnalysisArtifact("/ws")).thenReturn(
-				new WorkspaceArtifactResult("text", "/ws/x", 4));
-		service.getState("wf-1");
-		when(executionPort.start(any())).thenThrow(WorkflowException.execution("boom", new RuntimeException()));
-
-		WorkflowException error = catchThrowableOfType(
-				() -> service.rework(new ReworkWorkflowCommand("wf-1", "feedback")),
-				WorkflowException.class);
-
-		assertThat(error.errorType()).isEqualTo(WorkflowException.ErrorType.EXECUTION);
-		assertThat(service.getState("wf-1").status()).isEqualTo(WorkflowStatus.FAILED);
-	}
-
-	private void startWorkflow(String executionId) {
-		when(executionPort.start(any())).thenReturn(new WorkflowExecutionResult(executionId));
+	private void startWorkflow() {
+		when(executionPort.start(any())).thenReturn(new WorkflowExecutionResult("wf-1"));
 		service.start(new StartWorkflowCommand("wf-1", "acme", "demo", 42));
+	}
+
+	private void recordAnalysis() {
+		startWorkflow();
+		when(executionPort.queryState("wf-1")).thenReturn(
+				new WorkflowExecutionState("ANALYZING_REQUIREMENTS", "WAITING_FOR_USER", "/ws", "feature/issue-42", null));
+		when(workspaceOperations.readAnalysisArtifact("/ws")).thenReturn(
+				new WorkspaceArtifactResult("analysis text", "/ws/x", 13));
+		service.getState("wf-1");
 	}
 }

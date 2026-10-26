@@ -125,16 +125,17 @@ public final class Workflow {
 		if (status != WorkflowStatus.WAITING_FOR_USER) {
 			throw new IllegalWorkflowTransitionException("cannot continue from status " + status);
 		}
-		if (currentStage != WorkflowStage.ANALYZING_REQUIREMENTS) {
-			throw new IllegalWorkflowTransitionException("cannot continue from stage " + currentStage);
-		}
-		if (analysisText == null || branchName == null) {
-			throw new IllegalWorkflowTransitionException("cannot continue without a recorded analysis result");
+		boolean hasAnalysis = currentStage == WorkflowStage.ANALYZING_REQUIREMENTS
+				&& analysisText != null && branchName != null;
+		boolean hasDesign = currentStage == WorkflowStage.DESIGNING_SOLUTION && designText != null;
+		if (!hasAnalysis && !hasDesign) {
+			throw new IllegalWorkflowTransitionException("cannot continue without a recorded result");
 		}
 		resume();
 		completeStage();
 		this.analysisText = null;
 		this.branchName = null;
+		this.designText = null;
 	}
 
 	/**
@@ -146,15 +147,13 @@ public final class Workflow {
 		if (status != WorkflowStatus.WAITING_FOR_USER) {
 			throw new IllegalWorkflowTransitionException("cannot rework from status " + status);
 		}
-		if (currentStage != WorkflowStage.ANALYZING_REQUIREMENTS) {
-			throw new IllegalWorkflowTransitionException("cannot rework from stage " + currentStage);
-		}
-		if (analysisText == null) {
-			throw new IllegalWorkflowTransitionException("cannot rework without a recorded analysis result");
+		if (analysisText == null && designText == null) {
+			throw new IllegalWorkflowTransitionException("cannot rework without a recorded result");
 		}
 		resume();
 		this.analysisText = null;
 		this.branchName = null;
+		this.designText = null;
 		checkpoints.add(new Checkpoint("rework", feedback == null ? "" : feedback));
 	}
 
@@ -169,6 +168,7 @@ public final class Workflow {
 		}
 		this.designText = designText;
 		checkpoints.add(new Checkpoint("design", ""));
+		waitForUser();
 	}
 
 	/**

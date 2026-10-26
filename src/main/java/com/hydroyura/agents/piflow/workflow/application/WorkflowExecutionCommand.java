@@ -1,7 +1,7 @@
 package com.hydroyura.agents.piflow.workflow.application;
 
 /**
- * Команда запуска длительного исполнения Workflow через application-порт.
+ * Команда запуска длительного исполнения Workflow.
  *
  * @param workflowId идентификатор workflow
  * @param repositoryUrl нормализованный URL репозитория (clone URL)
@@ -14,8 +14,5 @@ public record WorkflowExecutionCommand(
 		String repositoryUrl,
 		String owner,
 		String repository,
-		long issueNumber,
-		String feedback,
-		String analysisText,
-		WorkflowExecutionKind kind) {
+		long issueNumber) {
 }

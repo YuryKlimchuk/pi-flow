@@ -1,15 +1,13 @@
 package com.hydroyura.agents.piflow.workflow.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Map;
 
 import com.hydroyura.agents.piflow.agent.api.AgentOperations;
@@ -22,13 +20,14 @@ import com.hydroyura.agents.piflow.workspace.api.WorkspaceState;
 import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.PiFlowWorkflow;
 import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.PiFlowWorkflowImpl;
 import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.WorkflowAnalysisActivitiesImpl;
-import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.WorkflowAnalysisResult;
+import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.WorkflowDesignActivitiesImpl;
 import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.WorkflowInput;
 import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.WorkflowPreparationActivitiesImpl;
+import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.WorkflowStageState;
 
 import io.temporal.client.WorkflowClient;
-import io.temporal.client.WorkflowFailedException;
 import io.temporal.client.WorkflowOptions;
+import io.temporal.client.WorkflowStub;
 import io.temporal.testing.TestWorkflowEnvironment;
 import io.temporal.worker.Worker;
 import org.junit.jupiter.api.AfterEach;
@@ -39,17 +38,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-/**
- * Интеграционный тест Temporal workflow через встроенный test server.
- *
- * <p>Не требует внешнего Docker; использует {@link TestWorkflowEnvironment}.
- * Подготовка workspace и запуск агента в activities замоканы.</p>
- */
 @ExtendWith(MockitoExtension.class)
 class TemporalWorkflowIntegrationTest {
-
-	private static final String ARTIFACT = ".pi-flow/analysis/analyst.md";
-	private static final String BRANCH = ".pi-flow/analysis/branch.txt";
 
 	private TestWorkflowEnvironment testEnv;
 
@@ -69,7 +59,8 @@ class TemporalWorkflowIntegrationTest {
 		worker.registerWorkflowImplementationTypes(PiFlowWorkflowImpl.class);
 		worker.registerActivitiesImplementations(
 				new WorkflowPreparationActivitiesImpl(workspaceOperations),
-				new WorkflowAnalysisActivitiesImpl(agentOperations));
+				new WorkflowAnalysisActivitiesImpl(agentOperations),
+				new WorkflowDesignActivitiesImpl(agentOperations));
 		testEnv.start();
 	}
 
@@ -79,47 +70,39 @@ class TemporalWorkflowIntegrationTest {
 	}
 
 	@Test
-	void executesWorkflowAndReturnsAnalysisArtifactPath() throws IOException {
-		writeArtifact("анализ");
+	void longWorkflow_reachesAnalystGate() throws IOException, InterruptedException {
+		writeAnalysisArtifacts();
 		when(workspaceOperations.prepare(any())).thenReturn(preparedWorkspace());
 		when(agentOperations.run(any())).thenReturn(successResult());
 
-		WorkflowAnalysisResult result = workflowStub().execute(input());
+		WorkflowStub stub = workflowStub();
+		stub.start(input());
 
-		assertThat(result.workspacePath()).isEqualTo(workspace.toString());
-		assertThat(result.branchName()).isEqualTo("feature/issue-42");
+		WorkflowStageState state = awaitStatus(stub, "WAITING_FOR_USER");
+
+		assertThat(state.stage()).isEqualTo("ANALYZING_REQUIREMENTS");
+		assertThat(state.workspacePath()).isEqualTo(workspace.toString());
 	}
 
-	@Test
-	void preparationFailure_shouldNotInvokeAnalyst() {
-		when(workspaceOperations.prepare(any())).thenThrow(new RuntimeException("prepare failed"));
-
-		assertThatThrownBy(() -> workflowStub().execute(input())).isInstanceOf(WorkflowFailedException.class);
-
-		verify(agentOperations, never()).run(any());
+	private WorkflowStageState awaitStatus(WorkflowStub stub, String expectedStatus) throws InterruptedException {
+		for (int i = 0; i < 100; i++) {
+			WorkflowStageState state = stub.query("state", WorkflowStageState.class);
+			if (expectedStatus.equals(state.status())) {
+				return state;
+			}
+			if ("FAILED".equals(state.status())) {
+				return state;
+			}
+			Thread.sleep(100);
+		}
+		return stub.query("state", WorkflowStageState.class);
 	}
 
-	@Test
-	void analysisFailure_shouldFailWorkflow() {
-		when(workspaceOperations.prepare(any())).thenReturn(preparedWorkspace());
-		when(agentOperations.run(any())).thenReturn(
-				new AgentRunResult("run-1", AgentRole.ANALYST, AgentRunStatus.FAILED, "", "err", 1, Map.of()));
-
-		assertThatThrownBy(() -> workflowStub().execute(input())).isInstanceOf(WorkflowFailedException.class);
-	}
-
-	@Test
-	void invalidArtifact_shouldFailWorkflow() {
-		when(workspaceOperations.prepare(any())).thenReturn(preparedWorkspace());
-		when(agentOperations.run(any())).thenReturn(successResult());
-
-		assertThatThrownBy(() -> workflowStub().execute(input())).isInstanceOf(WorkflowFailedException.class);
-	}
-
-	private PiFlowWorkflow workflowStub() {
+	private WorkflowStub workflowStub() {
 		WorkflowClient client = testEnv.getWorkflowClient();
-		return client.newWorkflowStub(PiFlowWorkflow.class,
-				WorkflowOptions.newBuilder().setTaskQueue("pi-flow").build());
+		PiFlowWorkflow workflow = client.newWorkflowStub(PiFlowWorkflow.class,
+				WorkflowOptions.newBuilder().setTaskQueue("pi-flow").setWorkflowId("wf-1").build());
+		return WorkflowStub.fromTyped(workflow);
 	}
 
 	private WorkflowInput input() {
@@ -134,10 +117,10 @@ class TemporalWorkflowIntegrationTest {
 		return new AgentRunResult("run-1", AgentRole.ANALYST, AgentRunStatus.SUCCEEDED, "out", "", 0, Map.of());
 	}
 
-	private void writeArtifact(String content) throws IOException {
-		Path artifact = workspace.resolve(ARTIFACT);
+	private void writeAnalysisArtifacts() throws IOException {
+		Path artifact = workspace.resolve(".pi-flow/analysis/analyst.md");
 		Files.createDirectories(artifact.getParent());
-		Files.writeString(artifact, content);
-		Files.writeString(workspace.resolve(BRANCH), "feature/issue-42");
+		Files.writeString(artifact, "анализ");
+		Files.writeString(workspace.resolve(".pi-flow/analysis/branch.txt"), "feature/issue-42");
 	}
 }

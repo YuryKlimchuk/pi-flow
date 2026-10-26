@@ -103,8 +103,19 @@ public class WorkflowAnalysisActivitiesImpl implements WorkflowAnalysisActivitie
 		if (input.feedback() != null && !input.feedback().isBlank()) {
 			instruction += "\n\nЗамечания пользователя (учти их при анализе):\n" + input.feedback();
 		}
-		if (input.analysisText() != null && !input.analysisText().isBlank()) {
-			instruction += "\n\nПредыдущий результат анализа:\n" + input.analysisText();
+		String previousAnalysis = input.analysisText();
+		if (previousAnalysis == null || previousAnalysis.isBlank()) {
+			Path previous = workspace.resolve(ARTIFACT_RELATIVE_PATH);
+			if (Files.isRegularFile(previous)) {
+				try {
+					previousAnalysis = Files.readString(previous, StandardCharsets.UTF_8);
+				} catch (IOException ignored) {
+					previousAnalysis = null;
+				}
+			}
+		}
+		if (previousAnalysis != null && !previousAnalysis.isBlank()) {
+			instruction += "\n\nПредыдущий результат анализа:\n" + previousAnalysis;
 		}
 		return instruction;
 	}

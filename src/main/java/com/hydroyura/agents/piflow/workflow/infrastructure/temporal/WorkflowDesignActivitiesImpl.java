@@ -85,8 +85,19 @@ public class WorkflowDesignActivitiesImpl implements WorkflowDesignActivities {
 				input.owner(), input.repository(), input.issueNumber(),
 				input.repositoryUrl(), workspace,
 				workspace.resolve(DESIGN_RELATIVE_PATH));
-		if (input.analysisText() != null && !input.analysisText().isBlank()) {
-			instruction += "\n\nРезультат анализа Analyst:\n" + input.analysisText();
+		String analysisText = input.analysisText();
+		if (analysisText == null || analysisText.isBlank()) {
+			Path analystFile = workspace.resolve(".pi-flow/analysis/analyst.md");
+			if (Files.isRegularFile(analystFile)) {
+				try {
+					analysisText = Files.readString(analystFile, StandardCharsets.UTF_8);
+				} catch (IOException ignored) {
+					analysisText = null;
+				}
+			}
+		}
+		if (analysisText != null && !analysisText.isBlank()) {
+			instruction += "\n\nРезультат анализа Analyst:\n" + analysisText;
 		}
 		return instruction;
 	}

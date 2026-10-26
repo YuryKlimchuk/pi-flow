@@ -13,6 +13,14 @@ Workflow SHALL предоставлять статус, текущий этап,
 - **WHEN** вызывающая сторона запрашивает состояние workflow после успешного анализа
 - **THEN** получает branch name Analyst и текстовый результат анализа через публичный контракт
 
+#### Scenario: Состояние следующего этапа
+- **WHEN** Workflow успешно продолжен после анализа
+- **THEN** состояние содержит `currentStage=DESIGNING_SOLUTION`, а UI-контракт не помечает старый analysis result как actionable
+
+#### Scenario: Состояние rework
+- **WHEN** rework принят до завершения нового анализа
+- **THEN** состояние содержит `currentStage=ANALYZING_REQUIREMENTS` и не содержит старых `analysisText` и `branchName`
+
 #### Scenario: Анализ ожидает решения
 - **WHEN** Analyst завершён успешно и артефакт анализа валиден
 - **THEN** публичное состояние содержит `WAITING_FOR_USER`, текущий этап `ANALYZING_REQUIREMENTS`, branch name и текст анализа
