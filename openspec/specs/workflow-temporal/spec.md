@@ -6,11 +6,15 @@
 ## Requirements
 
 ### Requirement: Порт запуска исполнения
-Application-слой `workflow` SHALL предоставлять порт запуска и получения результата длительного исполнения, не раскрывающий типы Temporal в публичном контракте.
+Application-слой `workflow` SHALL предоставлять порт запуска, получения результата и актуального состояния длительного исполнения, не раскрывающий типы Temporal в публичном контракте.
 
 #### Scenario: Запуск через порт
 - **WHEN** application-сценарий передаёт валидное состояние Workflow порту исполнения
 - **THEN** порт возвращает идентификатор исполнения и состояние принятого запуска типизированной моделью модуля
+
+#### Scenario: Запрос актуального состояния
+- **WHEN** вызывающая сторона запрашивает состояние workflow после старта execution
+- **THEN** порт возвращает публичное состояние, отражающее фактический прогресс или терминальный результат execution
 
 ### Requirement: Temporal-адаптер
 Infrastructure-адаптер SHALL преобразовывать публичную команду исполнения в Temporal workflow и SHALL возвращать ошибки подключения или запуска как типизированные ошибки application-контракта.
@@ -24,7 +28,7 @@ Infrastructure-адаптер SHALL преобразовывать публич�
 - **THEN** application-сценарий получает типизированную ошибку запуска, а доменное состояние не переходит в успешное выполнение
 
 ### Requirement: Минимальный сквозной сценарий
-Application-сценарий SHALL создавать Workflow и инициировать Temporal execution с контекстом Issue; preparation activity SHALL выполняться до analysis activity, а `agent.run` SHALL вызываться только analysis activity после успешной подготовки.
+Application-сценарий SHALL создавать Workflow и инициировать Temporal execution с контекстом Issue; preparation activity SHALL выполняться до analysis activity, а публичное состояние SHALL обновляться после завершения или ошибки Analyst.
 
 #### Scenario: Успешный запуск
 - **WHEN** валидная команда запуска передана при доступных workspace, agent и Temporal, а Analyst создаёт валидный артефакт
@@ -42,9 +46,17 @@ Application-сценарий SHALL создавать Workflow и инициир
 - **WHEN** Temporal недоступен при старте execution
 - **THEN** application-сценарий получает типизированную ошибку запуска, Workflow не помечается успешно запущенным и agent не вызывается
 
+#### Scenario: Успешный анализ
+- **WHEN** preparation и Analyst завершаются успешно и артефакт валиден
+- **THEN** публичное состояние содержит завершённый этап анализа, текст результата и предложенный branch name
+
 #### Scenario: Ошибка анализа
 - **WHEN** Analyst завершается ошибкой или возвращает невалидный результат
-- **THEN** Temporal execution завершается ошибкой и не сообщает об успешном workflow
+- **THEN** публичное состояние становится `FAILED` и не содержит успешного результата анализа
+
+#### Scenario: Продолжение
+- **WHEN** публичная команда продолжения принята после валидного анализа
+- **THEN** workflow запускает следующий этап, а состояние больше не сообщает анализ как единственный текущий этап
 
 ### Requirement: Подготовка workspace в Temporal activity
 Temporal execution SHALL выполнять `workspace.prepare` внутри preparation activity до analysis activity и SHALL передавать результат подготовки в следующую activity.
