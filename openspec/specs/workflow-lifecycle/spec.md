@@ -21,7 +21,7 @@
 - **THEN** команда отклоняется типизированной ошибкой валидации и Workflow не создаётся
 
 ### Requirement: Модель состояния Workflow
-Workflow SHALL предоставлять текущий этап и только актуальный результат Analyst; после Continue результат Analyst SHALL NOT считаться доступным результатом текущего этапа.
+Workflow SHALL предоставлять текущий этап и только актуальный результат Analyst/Architect; после Continue результат текущего этапа SHALL NOT считаться доступным результатом следующего этапа.
 
 #### Scenario: Чтение состояния
 - **WHEN** вызывающая сторона запрашивает состояние созданного Workflow
@@ -40,23 +40,27 @@ Workflow SHALL предоставлять текущий этап и тольк�
 - **THEN** состояние содержит `currentStage=ANALYZING_REQUIREMENTS` и не содержит старых `analysisText` и `branchName`
 
 ### Requirement: Допустимые переходы
-Домен Workflow SHALL разрешать переход из успешного `ANALYZING_REQUIREMENTS` в `DESIGNING_SOLUTION` ровно один раз и SHALL разрешать возврат из результата анализа в `ANALYZING_REQUIREMENTS` только через явную команду rework с feedback.
+Домен Workflow SHALL разрешать переход с ручного gate (Analyst или Architect) на следующий этап ровно один раз и SHALL разрешать повтор текущего этапа через явную команду rework с feedback.
 
-#### Scenario: Переход к следующему этапу
-- **WHEN** Workflow имеет успешный результат Analyst и пользователь принимает «Продолжить»
-- **THEN** статус остаётся `RUNNING`, текущим этапом становится `DESIGNING_SOLUTION`, а `ANALYZING_REQUIREMENTS` добавляется в историю
+#### Scenario: Переход после Analyst
+- **WHEN** Workflow в `WAITING_FOR_USER` после успешного `ANALYZING_REQUIREMENTS` и пользователь принимает «Продолжить»
+- **THEN** статус становится `RUNNING`, текущим этапом становится `DESIGNING_SOLUTION`, а `ANALYZING_REQUIREMENTS` добавляется в историю
+
+#### Scenario: Переход после Architect
+- **WHEN** Workflow в `WAITING_FOR_USER` после успешного `DESIGNING_SOLUTION` и пользователь принимает «Продолжить»
+- **THEN** статус становится `RUNNING`, текущим этапом становится `IMPLEMENTING`
 
 #### Scenario: Запрещённый переход
 - **WHEN** вызывающая сторона запрашивает переход, не разрешённый из текущего состояния
 - **THEN** состояние Workflow не изменяется и возвращается ошибка недопустимого перехода
 
 #### Scenario: Повторное продолжение
-- **WHEN** пользователь повторно отправляет команду продолжения для Workflow на `DESIGNING_SOLUTION`
+- **WHEN** пользователь повторно отправляет команду продолжения вне ручного gate
 - **THEN** домен отклоняет команду и не добавляет новый этап в историю
 
-#### Scenario: Возврат на rework
-- **WHEN** Workflow имеет результат Analyst и получает непустой feedback
-- **THEN** текущим этапом становится `ANALYZING_REQUIREMENTS`, опубликованные `analysisText` и `branchName` очищаются, а статус становится `RUNNING`
+#### Scenario: Rework текущего этапа
+- **WHEN** Workflow имеет результат текущего этапа (Analyst или Architect) и получает непустой feedback
+- **THEN** текущий этап сохраняется, опубликованный результат очищается, а статус становится `RUNNING`
 
 ### Requirement: Публичный запуск Workflow
 Публичный API `workflow` SHALL предоставлять команды запуска, запроса состояния, продолжения после анализа и повторного анализа с feedback.

@@ -6,7 +6,7 @@
 ## Requirements
 
 ### Requirement: Порт запуска исполнения
-Application-слой `workflow` SHALL предоставлять порт запуска, получения результата, актуального состояния и повторного запуска анализа с feedback, не раскрывающий типы Temporal в публичном контракте.
+Application-слой `workflow` SHALL предоставлять порт запуска, запроса актуального состояния, продолжения и rework единого длительного исполнения, не раскрывающий типы Temporal в публичном контракте.
 
 #### Scenario: Запуск через порт
 - **WHEN** application-сценарий передаёт валидное состояние Workflow порту исполнения
@@ -16,16 +16,16 @@ Application-слой `workflow` SHALL предоставлять порт зап
 - **WHEN** вызывающая сторона запрашивает состояние workflow после старта execution
 - **THEN** порт возвращает публичное состояние, отражающее фактический прогресс или терминальный результат execution
 
-#### Scenario: Новый execution для rework
-- **WHEN** application принимает валидный rework для существующего workflow
-- **THEN** создаётся новый execution id для анализа того же Issue и workspace-контекста
+#### Scenario: Продолжение сигналом
+- **WHEN** application принимает команду продолжения для workflow на ручном gate
+- **THEN** порт отправляет signal `continueStage` в тот же execution, не создавая новый execution id
 
-#### Scenario: Temporal недоступен
-- **WHEN** новый execution невозможно запустить
-- **THEN** rework получает типизированную ошибку запуска, а workflow не публикует состояние успешного нового анализа
+#### Scenario: Rework сигналом
+- **WHEN** application принимает команду rework с feedback
+- **THEN** порт отправляет signal `reworkStage(feedback)` в тот же execution, а workflow повторяет текущий этап
 
 ### Requirement: Temporal-адаптер
-Infrastructure-адаптер SHALL преобразовывать публичную команду исполнения в Temporal workflow и SHALL возвращать ошибки подключения или запуска как типизированные ошибки application-контракта.
+Infrastructure-адаптер SHALL управлять одним длительным Temporal execution через start, query и signals и SHALL возвращать ошибки подключения как типизированные ошибки application-контракта.
 
 #### Scenario: Temporal доступен
 - **WHEN** приложение подключено к настроенному Temporal endpoint
@@ -35,16 +35,20 @@ Infrastructure-адаптер SHALL преобразовывать публич�
 - **WHEN** endpoint Temporal недоступен при запуске
 - **THEN** application-сценарий получает типизированную ошибку запуска, а доменное состояние не переходит в успешное выполнение
 
+#### Scenario: Один workflow id
+- **WHEN** Analyst, Continue и Rework выполняются в одном флоу
+- **THEN** все операции используют один и тот же workflow id, а адаптер посылает signals/query вместо запуска отдельных execution
+
 ### Requirement: Минимальный сквозной сценарий
-Application-сценарий SHALL публиковать актуальный результат только последнего принятого execution и SHALL считать Continue переходом состояния, а не запуском Architect.
+Application-сценарий SHALL создавать один Workflow и инициировать один длительный Temporal execution; preparation SHALL предшествовать Analyst, а команды пользователя SHALL продвигать этапы через signals без новых execution.
 
 #### Scenario: Успешный запуск
-- **WHEN** валидная команда запуска передана при доступных workspace, agent и Temporal, а Analyst создаёт валидный артефакт
-- **THEN** Temporal execution завершается успешным результатом только после подготовки workspace и анализа
+- **WHEN** валидная команда запуска передана при доступных workspace, agent и Temporal
+- **THEN** Temporal execution выполняет подготовку workspace и анализ, не создавая отдельные execution на этап
 
 #### Scenario: Ошибка подготовки workspace
 - **WHEN** workspace отклоняет подготовку
-- **THEN** agent не запускается, Temporal execution завершается ошибкой и не возвращает успешный результат
+- **THEN** agent не запускается, execution завершается ошибкой и не возвращает успешный результат
 
 #### Scenario: Успешный запуск execution
 - **WHEN** валидная команда Issue передана при доступном Temporal
@@ -54,25 +58,21 @@ Application-сценарий SHALL публиковать актуальный �
 - **WHEN** Temporal недоступен при старте execution
 - **THEN** application-сценарий получает типизированную ошибку запуска, Workflow не помечается успешно запущенным и agent не вызывается
 
-#### Scenario: Успешный анализ
-- **WHEN** preparation и Analyst завершаются успешно и артефакт валиден
-- **THEN** публичное состояние содержит завершённый этап анализа, текст результата и предложенный branch name
+#### Scenario: Gate Analyst
+- **WHEN** Analyst завершается успешно и артефакт валиден
+- **THEN** execution переходит в `WAITING_FOR_USER` и ждёт signal `continueStage` или `reworkStage`
 
 #### Scenario: Ошибка анализа
 - **WHEN** Analyst завершается ошибкой или возвращает невалидный результат
 - **THEN** публичное состояние становится `FAILED` и не содержит успешного результата анализа
 
 #### Scenario: Продолжение
-- **WHEN** публичная команда продолжения принята после валидного анализа
-- **THEN** workflow запускает следующий этап, а состояние больше не сообщает анализ как единственный текущий этап
+- **WHEN** публичная команда продолжения принята на ручном gate
+- **THEN** тот же execution запускает следующий этап, а состояние больше не сообщает анализ как единственный текущий этап
 
-#### Scenario: Continue без Architect
-- **WHEN** пользователь принимает валидный анализ
-- **THEN** состояние переходит на `DESIGNING_SOLUTION`, Temporal не запускает Architect, а старый результат недоступен как текущий
-
-#### Scenario: Устаревшее execution
-- **WHEN** результат предыдущего execution приходит после принятия rework
-- **THEN** он не заменяет состояние нового анализа и не публикуется как актуальный результат
+#### Scenario: Rework
+- **WHEN** публичная команда rework с feedback принята на ручном gate
+- **THEN** тот же execution повторяет текущий этап с feedback, не создавая новый workflow id
 
 ### Requirement: Подготовка workspace в Temporal activity
 Temporal execution SHALL выполнять `workspace.prepare` внутри preparation activity до analysis activity и SHALL передавать результат подготовки в следующую activity.
