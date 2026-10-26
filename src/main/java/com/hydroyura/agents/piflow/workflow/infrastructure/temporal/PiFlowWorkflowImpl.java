@@ -36,15 +36,14 @@ public class PiFlowWorkflowImpl implements PiFlowWorkflow {
 					.build());
 
 	@Override
-	public String execute(WorkflowInput input) {
+	public WorkflowAnalysisResult execute(WorkflowInput input) {
 		WorkflowPreparationResult prepared = preparationActivities.prepare(input);
-		WorkflowAnalysisResult analysis = analysisActivities.analyze(new WorkflowAnalysisInput(
+		return analysisActivities.analyze(new WorkflowAnalysisInput(
 				input.workflowId(),
 				input.repositoryUrl(),
 				input.owner(),
 				input.repository(),
 				input.issueNumber(),
 				prepared.path()));
-		return analysis.artifactPath();
 	}
 }

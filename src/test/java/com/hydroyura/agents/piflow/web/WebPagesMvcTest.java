@@ -3,10 +3,12 @@ package com.hydroyura.agents.piflow.web;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
 
@@ -166,18 +168,64 @@ class WebPagesMvcTest {
 	}
 
 	@Test
-	void workflowStart_shouldRenderResultState() throws Exception {
-		when(workflowOperations.start(any())).thenReturn(new WorkflowState(
-				"wf-1", "https://github.com/acme/demo.git", 42, WorkflowStatus.CREATED,
-				WorkflowStage.ANALYZING_REQUIREMENTS, List.of(), "exec-1"));
-
+	void workflowStart_shouldRedirectToTrack() throws Exception {
 		mockMvc.perform(post("/workflows/start")
 					.param("owner", "acme")
 					.param("repository", "demo")
-					.param("issueNumber", "42"))
+					.param("issueNumber", "42")
+					.param("workflowId", "wf-1"))
+				.andExpect(status().is3xxRedirection())
+				.andExpect(redirectedUrl("/workflows/track?workflowId=wf-1"));
+	}
+
+	@Test
+	void workflowTrack_whenRunning_shouldShowIndicator() throws Exception {
+		when(workflowOperations.getState("wf-1")).thenReturn(
+				state(WorkflowStatus.RUNNING, WorkflowStage.ANALYZING_REQUIREMENTS, null, null, null));
+
+		mockMvc.perform(get("/workflows/track").param("workflowId", "wf-1"))
 				.andExpect(status().isOk())
-				.andExpect(view().name("workflow-start"))
-				.andExpect(content().string(containsString("wf-1")))
-				.andExpect(content().string(containsString("exec-1")));
+				.andExpect(view().name("workflow-status"))
+				.andExpect(content().string(containsString("Анализ задачи выполняется")));
+	}
+
+	@Test
+	void workflowTrack_whenResult_shouldShowTextAndContinue() throws Exception {
+		when(workflowOperations.getState("wf-1")).thenReturn(
+				state(WorkflowStatus.RUNNING, WorkflowStage.ANALYZING_REQUIREMENTS, "Текст анализа", "feature/issue-42", null));
+
+		mockMvc.perform(get("/workflows/track").param("workflowId", "wf-1"))
+				.andExpect(status().isOk())
+				.andExpect(content().string(containsString("Текст анализа")))
+				.andExpect(content().string(containsString("feature/issue-42")))
+				.andExpect(content().string(containsString("Продолжить")));
+	}
+
+	@Test
+	void workflowTrack_whenFailed_shouldShowError() throws Exception {
+		when(workflowOperations.getState("wf-1")).thenReturn(
+				state(WorkflowStatus.FAILED, WorkflowStage.ANALYZING_REQUIREMENTS, null, null, "boom"));
+
+		mockMvc.perform(get("/workflows/track").param("workflowId", "wf-1"))
+				.andExpect(status().isOk())
+				.andExpect(content().string(containsString("Workflow завершился ошибкой")))
+				.andExpect(content().string(containsString("boom")));
+	}
+
+	@Test
+	void workflowContinue_shouldCallContinueAndRedirect() throws Exception {
+		mockMvc.perform(post("/workflows/continue")
+					.param("workflowId", "wf-1")
+					.param("branchName", "feature/issue-42"))
+				.andExpect(status().is3xxRedirection())
+				.andExpect(redirectedUrl("/workflows/track?workflowId=wf-1"));
+
+		verify(workflowOperations).continueWorkflow(any());
+	}
+
+	private WorkflowState state(WorkflowStatus status, WorkflowStage stage, String analysisText, String branchName,
+			String errorMessage) {
+		return new WorkflowState("wf-1", "https://github.com/acme/demo.git", 42, status, stage, List.of(), "exec-1",
+				analysisText, branchName, errorMessage);
 	}
 }

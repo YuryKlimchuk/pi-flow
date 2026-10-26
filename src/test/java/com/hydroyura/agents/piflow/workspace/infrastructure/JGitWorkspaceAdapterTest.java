@@ -77,6 +77,26 @@ class JGitWorkspaceAdapterTest {
 	}
 
 	@Test
+	void isClean_whenOnlyPiFlowUntracked_shouldReturnTrue() throws Exception {
+		Path target = tempDir.resolve("clone");
+		adapter.cloneRepository(source.toUri().toString(), target, branch);
+		Path artifact = target.resolve(".pi-flow/analysis/analyst.md");
+		Files.createDirectories(artifact.getParent());
+		Files.writeString(artifact, "analysis");
+
+		assertThat(adapter.isClean(target)).isTrue();
+	}
+
+	@Test
+	void isClean_whenOtherUntracked_shouldReturnFalse() throws Exception {
+		Path target = tempDir.resolve("clone");
+		adapter.cloneRepository(source.toUri().toString(), target, branch);
+		Files.writeString(target.resolve("other.txt"), "untracked");
+
+		assertThat(adapter.isClean(target)).isFalse();
+	}
+
+	@Test
 	void updateToRemote_whenSourceHasNewCommit_shouldUpdateCopy() throws Exception {
 		Path target = tempDir.resolve("clone");
 		adapter.cloneRepository(source.toUri().toString(), target, branch);

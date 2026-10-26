@@ -3,14 +3,17 @@ package com.hydroyura.agents.piflow.workspace.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
 
+import com.hydroyura.agents.piflow.workspace.api.WorkspaceArtifactResult;
 import com.hydroyura.agents.piflow.workspace.api.WorkspaceException;
 import com.hydroyura.agents.piflow.workspace.api.WorkspacePreparationRequest;
 import com.hydroyura.agents.piflow.workspace.api.WorkspaceResult;
@@ -43,7 +46,7 @@ class WorkspaceServiceTest {
 		WorkspaceLayout layout = new PropertiesWorkspaceLayout(
 				new WorkspaceProperties(tempDir.resolve("ws"), tempDir.resolve("locks"), Duration.ofMinutes(1)));
 		service = new WorkspaceService(localGit, layout);
-		when(localGit.resolveBaseBranch(any(), any())).thenAnswer(inv -> inv.getArgument(1));
+		lenient().when(localGit.resolveBaseBranch(any(), any())).thenAnswer(inv -> inv.getArgument(1));
 	}
 
 	@Test
@@ -96,5 +99,50 @@ class WorkspaceServiceTest {
 		WorkspaceException error = catchThrowableOfType(() -> service.prepare(request), WorkspaceException.class);
 
 		assertThat(error.errorType()).isEqualTo(WorkspaceException.ErrorType.GIT);
+	}
+
+	@Test
+	void readAnalysisArtifact_whenExists_shouldReturnText() throws IOException {
+		Path ws = tempDir.resolve("ws1");
+		Path artifact = ws.resolve(".pi-flow/analysis/analyst.md");
+		Files.createDirectories(artifact.getParent());
+		Files.writeString(artifact, "текст анализа");
+
+		WorkspaceArtifactResult result = service.readAnalysisArtifact(ws.toString());
+
+		assertThat(result.text()).isEqualTo("текст анализа");
+		assertThat(result.path()).isEqualTo(artifact.toString());
+	}
+
+	@Test
+	void readAnalysisArtifact_whenMissing_shouldThrowResult() throws IOException {
+		Path ws = tempDir.resolve("ws2");
+		Files.createDirectories(ws);
+
+		WorkspaceException error = catchThrowableOfType(() -> service.readAnalysisArtifact(ws.toString()),
+				WorkspaceException.class);
+
+		assertThat(error.errorType()).isEqualTo(WorkspaceException.ErrorType.RESULT);
+	}
+
+	@Test
+	void readAnalysisArtifact_whenEmpty_shouldThrowResult() throws IOException {
+		Path ws = tempDir.resolve("ws3");
+		Path artifact = ws.resolve(".pi-flow/analysis/analyst.md");
+		Files.createDirectories(artifact.getParent());
+		Files.writeString(artifact, "   ");
+
+		WorkspaceException error = catchThrowableOfType(() -> service.readAnalysisArtifact(ws.toString()),
+				WorkspaceException.class);
+
+		assertThat(error.errorType()).isEqualTo(WorkspaceException.ErrorType.RESULT);
+	}
+
+	@Test
+	void readAnalysisArtifact_whenBlankPath_shouldThrowValidation() {
+		WorkspaceException error = catchThrowableOfType(() -> service.readAnalysisArtifact("  "),
+				WorkspaceException.class);
+
+		assertThat(error.errorType()).isEqualTo(WorkspaceException.ErrorType.VALIDATION);
 	}
 }

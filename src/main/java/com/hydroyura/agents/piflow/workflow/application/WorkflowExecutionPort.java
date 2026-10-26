@@ -15,4 +15,12 @@ public interface WorkflowExecutionPort {
 	 * @return идентификатор исполнения
 	 */
 	WorkflowExecutionResult start(WorkflowExecutionCommand command);
+
+	/**
+	 * Возвращает актуальное состояние длительного исполнения по идентификатору.
+	 *
+	 * @param executionId идентификатор исполнения
+	 * @return фаза исполнения и результат/ошибку
+	 */
+	WorkflowExecutionState getState(String executionId);
 }

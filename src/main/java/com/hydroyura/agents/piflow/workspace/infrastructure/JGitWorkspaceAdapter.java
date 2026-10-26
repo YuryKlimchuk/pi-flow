@@ -96,7 +96,20 @@ public class JGitWorkspaceAdapter implements LocalGit {
 	public boolean isClean(Path directory) {
 		try (Git git = Git.open(directory.toFile())) {
 			Status status = git.status().call();
-			return status.isClean();
+			if (!status.getAdded().isEmpty()
+					|| !status.getChanged().isEmpty()
+					|| !status.getConflicting().isEmpty()
+					|| !status.getMissing().isEmpty()
+					|| !status.getModified().isEmpty()
+					|| !status.getRemoved().isEmpty()) {
+				return false;
+			}
+			for (String untracked : status.getUntracked()) {
+				if (!untracked.startsWith(".pi-flow/")) {
+					return false;
+				}
+			}
+			return true;
 		} catch (GitAPIException | IOException e) {
 			throw WorkspaceGitException.git("failed to read repository status: " + directory, e);
 		}

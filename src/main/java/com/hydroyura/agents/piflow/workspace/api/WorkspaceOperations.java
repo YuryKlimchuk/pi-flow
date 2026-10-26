@@ -12,4 +12,13 @@ public interface WorkspaceOperations {
 	 * @return результат с путём, репозиторием, веткой и состоянием
 	 */
 	WorkspaceResult prepare(WorkspacePreparationRequest request);
+
+	/**
+	 * Читает ожидаемый артефакт анализа {@code .pi-flow/analysis/analyst.md}
+	 * внутри подготовленного workspace.
+	 *
+	 * @param workspacePath путь к подготовленному workspace
+	 * @return текст и метаданные артефакта
+	 */
+	WorkspaceArtifactResult readAnalysisArtifact(String workspacePath);
 }

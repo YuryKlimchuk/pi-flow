@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import com.hydroyura.agents.piflow.workspace.api.WorkspaceArtifactResult;
 import com.hydroyura.agents.piflow.workspace.api.WorkspaceException;
 import com.hydroyura.agents.piflow.workspace.api.WorkspaceOperations;
 import com.hydroyura.agents.piflow.workspace.api.WorkspacePreparationRequest;
@@ -49,6 +50,30 @@ public class WorkspaceService implements WorkspaceOperations {
 			return new WorkspaceResult(directory, request.repositoryUrl(), branch, state);
 		} catch (WorkspaceGitException e) {
 			throw WorkspaceErrors.map(e);
+		}
+	}
+
+	@Override
+	public WorkspaceArtifactResult readAnalysisArtifact(String workspacePath) {
+		if (workspacePath == null || workspacePath.isBlank()) {
+			throw WorkspaceException.validation("workspace path must not be blank");
+		}
+		Path root = Path.of(workspacePath).normalize();
+		Path artifact = root.resolve(".pi-flow/analysis/analyst.md").normalize();
+		if (!artifact.startsWith(root)) {
+			throw WorkspaceException.validation("analysis artifact path escapes workspace root");
+		}
+		if (!Files.isRegularFile(artifact) || !Files.isReadable(artifact)) {
+			throw WorkspaceException.result("analysis artifact missing or not readable: " + artifact);
+		}
+		try {
+			String text = Files.readString(artifact);
+			if (text == null || text.isBlank()) {
+				throw WorkspaceException.result("analysis artifact is empty: " + artifact);
+			}
+			return new WorkspaceArtifactResult(text, artifact.toString(), Files.size(artifact));
+		} catch (IOException e) {
+			throw WorkspaceException.filesystem("cannot read analysis artifact: " + artifact, e);
 		}
 	}
 

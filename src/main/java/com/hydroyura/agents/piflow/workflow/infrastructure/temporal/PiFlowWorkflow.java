@@ -10,5 +10,5 @@ import io.temporal.workflow.WorkflowMethod;
 public interface PiFlowWorkflow {
 
 	@WorkflowMethod
-	String execute(WorkflowInput input);
+	WorkflowAnalysisResult execute(WorkflowInput input);
 }

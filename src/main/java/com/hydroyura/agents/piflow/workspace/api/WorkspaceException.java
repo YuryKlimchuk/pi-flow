@@ -13,7 +13,8 @@ public class WorkspaceException extends RuntimeException {
 		GIT,
 		CORRUPT,
 		DIRTY,
-		LOCK_BUSY
+		LOCK_BUSY,
+		RESULT
 	}
 
 	private final ErrorType errorType;
@@ -54,6 +55,10 @@ public class WorkspaceException extends RuntimeException {
 
 	public static WorkspaceException lockBusy(String message) {
 		return new WorkspaceException(ErrorType.LOCK_BUSY, message);
+	}
+
+	public static WorkspaceException result(String message) {
+		return new WorkspaceException(ErrorType.RESULT, message);
 	}
 
 	public ErrorType errorType() {

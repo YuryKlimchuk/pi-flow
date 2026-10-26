@@ -75,4 +75,64 @@ class WorkflowDomainTest {
 		assertThat(workflow.executionId()).isEqualTo("exec-1");
 		assertThat(workflow.checkpoints()).contains(new Checkpoint("execution", "exec-1"));
 	}
+
+	@Test
+	void markRunning_shouldTransitionCreatedToRunning() {
+		Workflow workflow = Workflow.create(
+				new WorkflowId("wf-1"),
+				new WorkflowContext("https://github.com/o/r", 42));
+
+		workflow.markRunning();
+
+		assertThat(workflow.status()).isEqualTo(WorkflowStatus.RUNNING);
+	}
+
+	@Test
+	void recordAnalysis_shouldStoreResult() {
+		Workflow workflow = Workflow.create(
+				new WorkflowId("wf-1"),
+				new WorkflowContext("https://github.com/o/r", 42));
+
+		workflow.recordAnalysis("feature/issue-42", "текст анализа");
+
+		assertThat(workflow.branchName()).isEqualTo("feature/issue-42");
+		assertThat(workflow.analysisText()).isEqualTo("текст анализа");
+	}
+
+	@Test
+	void continueAfterAnalysis_withoutResult_shouldReject() {
+		Workflow workflow = Workflow.create(
+				new WorkflowId("wf-1"),
+				new WorkflowContext("https://github.com/o/r", 42));
+
+		assertThatThrownBy(workflow::continueAfterAnalysis)
+				.isInstanceOf(IllegalWorkflowTransitionException.class);
+
+		assertThat(workflow.currentStage()).isEqualTo(WorkflowStage.ANALYZING_REQUIREMENTS);
+	}
+
+	@Test
+	void continueAfterAnalysis_withResult_shouldAdvanceStage() {
+		Workflow workflow = Workflow.create(
+				new WorkflowId("wf-1"),
+				new WorkflowContext("https://github.com/o/r", 42));
+		workflow.recordAnalysis("feature/issue-42", "текст анализа");
+
+		workflow.continueAfterAnalysis();
+
+		assertThat(workflow.currentStage()).isEqualTo(WorkflowStage.DESIGNING_SOLUTION);
+		assertThat(workflow.status()).isEqualTo(WorkflowStatus.RUNNING);
+	}
+
+	@Test
+	void fail_shouldStoreReason() {
+		Workflow workflow = Workflow.create(
+				new WorkflowId("wf-1"),
+				new WorkflowContext("https://github.com/o/r", 42));
+
+		workflow.fail("boom");
+
+		assertThat(workflow.status()).isEqualTo(WorkflowStatus.FAILED);
+		assertThat(workflow.failureReason()).isEqualTo("boom");
+	}
 }

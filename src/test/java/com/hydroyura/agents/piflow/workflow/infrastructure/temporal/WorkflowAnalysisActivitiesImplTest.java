@@ -33,6 +33,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class WorkflowAnalysisActivitiesImplTest {
 
 	private static final String ARTIFACT = ".pi-flow/analysis/analyst.md";
+	private static final String BRANCH = ".pi-flow/analysis/branch.txt";
 
 	@TempDir
 	Path workspace;
@@ -50,11 +51,13 @@ class WorkflowAnalysisActivitiesImplTest {
 	@Test
 	void analyze_whenSuccessful_shouldReturnArtifactMetadata() throws IOException {
 		writeArtifact("## Понимание задачи\nСодержимое анализа");
+		writeBranch("feature/issue-42");
 		when(agentOperations.run(any())).thenReturn(successResult());
 
 		WorkflowAnalysisResult result = activity.analyze(input());
 
-		assertThat(result.artifactPath()).isEqualTo(workspace.resolve(ARTIFACT).toString());
+		assertThat(result.workspacePath()).isEqualTo(workspace.toString());
+		assertThat(result.branchName()).isEqualTo("feature/issue-42");
 		assertThat(result.runId()).isEqualTo("run-1");
 		assertThat(result.artifactSize()).isGreaterThan(0);
 
@@ -143,14 +146,58 @@ class WorkflowAnalysisActivitiesImplTest {
 	@Test
 	void analyze_whenRepeated_shouldKeepForeignFiles() throws IOException {
 		writeArtifact("анализ");
+		writeBranch("feature/issue-42");
 		Path foreign = workspace.resolve("foreign.txt");
 		Files.writeString(foreign, "чужие данные");
 		when(agentOperations.run(any())).thenReturn(successResult());
 
 		WorkflowAnalysisResult result = activity.analyze(input());
 
-		assertThat(result.artifactPath()).isNotBlank();
+		assertThat(result.workspacePath()).isNotBlank();
 		assertThat(Files.readString(foreign)).isEqualTo("чужие данные");
+	}
+
+	@Test
+	void analyze_whenBranchMissing_shouldThrowInvalidResult() throws IOException {
+		writeArtifact("анализ");
+		when(agentOperations.run(any())).thenReturn(successResult());
+
+		WorkflowAnalysisException error = catchThrowableOfType(() -> activity.analyze(input()),
+				WorkflowAnalysisException.class);
+
+		assertThat(error.reason()).isEqualTo(WorkflowAnalysisException.Reason.INVALID_RESULT);
+	}
+
+	@Test
+	void analyze_whenBranchInvalid_shouldThrowInvalidResult() throws IOException {
+		writeArtifact("анализ");
+		writeBranch("ветка с пробелом");
+		when(agentOperations.run(any())).thenReturn(successResult());
+
+		WorkflowAnalysisException error = catchThrowableOfType(() -> activity.analyze(input()),
+				WorkflowAnalysisException.class);
+
+		assertThat(error.reason()).isEqualTo(WorkflowAnalysisException.Reason.INVALID_RESULT);
+	}
+
+	@Test
+	void isValidBranchName_shouldAcceptValidNames() {
+		assertThat(WorkflowAnalysisActivitiesImpl.isValidBranchName("feature/issue-42-login")).isTrue();
+		assertThat(WorkflowAnalysisActivitiesImpl.isValidBranchName("main")).isTrue();
+		assertThat(WorkflowAnalysisActivitiesImpl.isValidBranchName("fix_42")).isTrue();
+	}
+
+	@Test
+	void isValidBranchName_shouldRejectInvalidNames() {
+		assertThat(WorkflowAnalysisActivitiesImpl.isValidBranchName(null)).isFalse();
+		assertThat(WorkflowAnalysisActivitiesImpl.isValidBranchName("")).isFalse();
+		assertThat(WorkflowAnalysisActivitiesImpl.isValidBranchName("feature branch")).isFalse();
+		assertThat(WorkflowAnalysisActivitiesImpl.isValidBranchName("ветка")).isFalse();
+		assertThat(WorkflowAnalysisActivitiesImpl.isValidBranchName("feature..x")).isFalse();
+		assertThat(WorkflowAnalysisActivitiesImpl.isValidBranchName("/feature")).isFalse();
+		assertThat(WorkflowAnalysisActivitiesImpl.isValidBranchName("feature/")).isFalse();
+		assertThat(WorkflowAnalysisActivitiesImpl.isValidBranchName("feature.")).isFalse();
+		assertThat(WorkflowAnalysisActivitiesImpl.isValidBranchName("feature@{x}")).isFalse();
 	}
 
 	private WorkflowAnalysisInput input() {
@@ -166,5 +213,9 @@ class WorkflowAnalysisActivitiesImplTest {
 		Path artifact = workspace.resolve(ARTIFACT);
 		Files.createDirectories(artifact.getParent());
 		Files.writeString(artifact, content);
+	}
+
+	private void writeBranch(String branchName) throws IOException {
+		Files.writeString(workspace.resolve(BRANCH), branchName);
 	}
 }

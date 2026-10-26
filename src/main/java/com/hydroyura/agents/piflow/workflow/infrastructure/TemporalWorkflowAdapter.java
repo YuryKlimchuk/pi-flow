@@ -3,13 +3,18 @@ package com.hydroyura.agents.piflow.workflow.infrastructure;
 import com.hydroyura.agents.piflow.workflow.application.WorkflowExecutionCommand;
 import com.hydroyura.agents.piflow.workflow.application.WorkflowExecutionPort;
 import com.hydroyura.agents.piflow.workflow.application.WorkflowExecutionResult;
+import com.hydroyura.agents.piflow.workflow.application.WorkflowExecutionState;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowException;
 import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.PiFlowWorkflow;
+import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.WorkflowAnalysisResult;
 import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.WorkflowInput;
 
 import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowOptions;
 import io.temporal.client.WorkflowStub;
+
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.springframework.stereotype.Component;
 
@@ -53,6 +58,19 @@ public class TemporalWorkflowAdapter implements WorkflowExecutionPort {
 			throw WorkflowException.execution("temporal execution failed to start: " + e.getMessage(), e);
 		} catch (RuntimeException e) {
 			throw WorkflowException.execution("temporal execution start failed: " + e.getMessage(), e);
+		}
+	}
+
+	@Override
+	public WorkflowExecutionState getState(String executionId) {
+		WorkflowStub stub = workflowClient.newUntypedWorkflowStub(executionId);
+		try {
+			WorkflowAnalysisResult result = stub.getResult(500, TimeUnit.MILLISECONDS, WorkflowAnalysisResult.class);
+			return WorkflowExecutionState.succeeded(result.workspacePath(), result.branchName());
+		} catch (TimeoutException e) {
+			return WorkflowExecutionState.running();
+		} catch (io.temporal.client.WorkflowException e) {
+			return WorkflowExecutionState.failed(e.getMessage());
 		}
 	}
 }

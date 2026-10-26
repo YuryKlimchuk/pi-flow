@@ -12,6 +12,9 @@ import java.util.List;
  * @param currentStage текущий этап
  * @param completedStages история завершённых этапов
  * @param executionId идентификатор исполнения Temporal, если задан
+ * @param analysisText текст артефакта анализа, если анализ завершён
+ * @param branchName предложенное имя ветки, если анализ завершён
+ * @param errorMessage сообщение об ошибке, если workflow завершился ошибкой
  */
 public record WorkflowState(
 		String workflowId,
@@ -20,5 +23,8 @@ public record WorkflowState(
 		WorkflowStatus status,
 		WorkflowStage currentStage,
 		List<WorkflowStage> completedStages,
-		String executionId) {
+		String executionId,
+		String analysisText,
+		String branchName,
+		String errorMessage) {
 }

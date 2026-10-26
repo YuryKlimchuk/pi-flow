@@ -20,4 +20,12 @@ public interface WorkflowOperations {
 	 * @return публичное состояние
 	 */
 	WorkflowState getState(String workflowId);
+
+	/**
+	 * Продолжает Workflow после успешного анализа с предложенным именем ветки.
+	 *
+	 * @param command команда продолжения
+	 * @return публичное состояние после перехода на следующий этап
+	 */
+	WorkflowState continueWorkflow(ContinueWorkflowCommand command);
 }

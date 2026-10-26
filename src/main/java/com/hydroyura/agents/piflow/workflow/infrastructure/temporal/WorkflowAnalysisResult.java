@@ -3,12 +3,14 @@ package com.hydroyura.agents.piflow.workflow.infrastructure.temporal;
 /**
  * Результат activity анализа проекта.
  *
- * @param artifactPath путь к сохранённому артефакту анализа
+ * @param workspacePath путь к подготовленному workspace
+ * @param branchName предложенное Analyst имя ветки
  * @param runId идентификатор запуска агента
  * @param artifactSize размер артефакта в байтах
  */
 public record WorkflowAnalysisResult(
-		String artifactPath,
+		String workspacePath,
+		String branchName,
 		String runId,
 		long artifactSize) {
 }

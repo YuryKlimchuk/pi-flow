@@ -8,6 +8,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.hydroyura.agents.piflow.workspace.api.WorkspaceArtifactResult;
+import com.hydroyura.agents.piflow.workspace.api.WorkspaceOperations;
+import com.hydroyura.agents.piflow.workflow.api.ContinueWorkflowCommand;
 import com.hydroyura.agents.piflow.workflow.api.StartWorkflowCommand;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowException;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStage;
@@ -27,11 +30,14 @@ class WorkflowServiceTest {
 	@Mock
 	private WorkflowExecutionPort executionPort;
 
+	@Mock
+	private WorkspaceOperations workspaceOperations;
+
 	private WorkflowService service;
 
 	@BeforeEach
 	void setUp() {
-		service = new WorkflowService(executionPort, new InMemoryWorkflowRepository());
+		service = new WorkflowService(executionPort, new InMemoryWorkflowRepository(), workspaceOperations);
 	}
 
 	@Test
@@ -42,7 +48,7 @@ class WorkflowServiceTest {
 		WorkflowState state = service.start(command);
 
 		assertThat(state.workflowId()).isEqualTo("wf-1");
-		assertThat(state.status()).isEqualTo(WorkflowStatus.CREATED);
+		assertThat(state.status()).isEqualTo(WorkflowStatus.RUNNING);
 		assertThat(state.currentStage()).isEqualTo(WorkflowStage.ANALYZING_REQUIREMENTS);
 		assertThat(state.executionId()).isEqualTo("exec-1");
 		assertThat(state.repositoryUrl()).isEqualTo("https://github.com/acme/demo.git");
@@ -89,5 +95,72 @@ class WorkflowServiceTest {
 		WorkflowException error = catchThrowableOfType(() -> service.getState("missing"), WorkflowException.class);
 
 		assertThat(error.errorType()).isEqualTo(WorkflowException.ErrorType.NOT_FOUND);
+	}
+
+	@Test
+	void getState_whenExecutionRunning_shouldNotRecordResult() {
+		startWorkflow("exec-1");
+		when(executionPort.getState("exec-1")).thenReturn(WorkflowExecutionState.running());
+
+		WorkflowState state = service.getState("wf-1");
+
+		assertThat(state.status()).isEqualTo(WorkflowStatus.RUNNING);
+		assertThat(state.analysisText()).isNull();
+		assertThat(state.branchName()).isNull();
+	}
+
+	@Test
+	void getState_whenExecutionSucceeded_shouldRecordAnalysis() {
+		startWorkflow("exec-1");
+		when(executionPort.getState("exec-1")).thenReturn(
+				WorkflowExecutionState.succeeded("/ws", "feature/issue-42"));
+		when(workspaceOperations.readAnalysisArtifact("/ws")).thenReturn(
+				new WorkspaceArtifactResult("analysis text", "/ws/.pi-flow/analysis/analyst.md", 13));
+
+		WorkflowState state = service.getState("wf-1");
+
+		assertThat(state.analysisText()).isEqualTo("analysis text");
+		assertThat(state.branchName()).isEqualTo("feature/issue-42");
+	}
+
+	@Test
+	void getState_whenExecutionFailed_shouldMarkFailed() {
+		startWorkflow("exec-1");
+		when(executionPort.getState("exec-1")).thenReturn(WorkflowExecutionState.failed("analysis boom"));
+
+		WorkflowState state = service.getState("wf-1");
+
+		assertThat(state.status()).isEqualTo(WorkflowStatus.FAILED);
+		assertThat(state.errorMessage()).isEqualTo("analysis boom");
+	}
+
+	@Test
+	void continueWorkflow_whenResultRecorded_shouldAdvanceStage() {
+		startWorkflow("exec-1");
+		when(executionPort.getState("exec-1")).thenReturn(
+				WorkflowExecutionState.succeeded("/ws", "feature/issue-42"));
+		when(workspaceOperations.readAnalysisArtifact("/ws")).thenReturn(
+				new WorkspaceArtifactResult("analysis text", "/ws/x", 13));
+		service.getState("wf-1");
+
+		WorkflowState state = service.continueWorkflow(new ContinueWorkflowCommand("wf-1", "feature/issue-42"));
+
+		assertThat(state.currentStage()).isEqualTo(WorkflowStage.DESIGNING_SOLUTION);
+	}
+
+	@Test
+	void continueWorkflow_whenNoResult_shouldReject() {
+		startWorkflow("exec-1");
+
+		WorkflowException error = catchThrowableOfType(
+				() -> service.continueWorkflow(new ContinueWorkflowCommand("wf-1", "feature/issue-42")),
+				WorkflowException.class);
+
+		assertThat(error.errorType()).isEqualTo(WorkflowException.ErrorType.ILLEGAL_TRANSITION);
+	}
+
+	private void startWorkflow(String executionId) {
+		when(executionPort.start(any())).thenReturn(new WorkflowExecutionResult(executionId));
+		service.start(new StartWorkflowCommand("wf-1", "acme", "demo", 42));
 	}
 }

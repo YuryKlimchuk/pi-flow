@@ -24,6 +24,9 @@ public final class Workflow {
 	private final List<WorkflowStage> completedStages = new ArrayList<>();
 	private final List<Checkpoint> checkpoints = new ArrayList<>();
 	private String executionId;
+	private String branchName;
+	private String analysisText;
+	private String failureReason;
 
 	private static final Map<WorkflowStage, Set<WorkflowStage>> NEXT_STAGES = nextStages();
 
@@ -68,6 +71,55 @@ public final class Workflow {
 
 	public String executionId() {
 		return executionId;
+	}
+
+	public String branchName() {
+		return branchName;
+	}
+
+	public String analysisText() {
+		return analysisText;
+	}
+
+	public String failureReason() {
+		return failureReason;
+	}
+
+	/**
+	 * Переводит только что созданный Workflow в состояние исполнения.
+	 */
+	public void markRunning() {
+		if (status == WorkflowStatus.CREATED) {
+			status = WorkflowStatus.RUNNING;
+		}
+	}
+
+	/**
+	 * Фиксирует результат анализа Analyst (текст и предложенное имя ветки).
+	 *
+	 * @param branchName предложенное имя ветки
+	 * @param analysisText текст артефакта анализа
+	 */
+	public void recordAnalysis(String branchName, String analysisText) {
+		if (currentStage != WorkflowStage.ANALYZING_REQUIREMENTS) {
+			throw new IllegalWorkflowTransitionException("cannot record analysis from stage " + currentStage);
+		}
+		if (status != WorkflowStatus.CREATED && status != WorkflowStatus.RUNNING) {
+			throw new IllegalWorkflowTransitionException("cannot record analysis from status " + status);
+		}
+		this.branchName = branchName;
+		this.analysisText = analysisText;
+		checkpoints.add(new Checkpoint("analysis", branchName == null ? "" : branchName));
+	}
+
+	/**
+	 * Продолжает Workflow после успешного анализа на следующий этап.
+	 */
+	public void continueAfterAnalysis() {
+		if (analysisText == null || branchName == null) {
+			throw new IllegalWorkflowTransitionException("cannot continue without a recorded analysis result");
+		}
+		completeStage();
 	}
 
 	/**
@@ -155,6 +207,7 @@ public final class Workflow {
 	 */
 	public void fail(String reason) {
 		status = WorkflowStatus.FAILED;
+		failureReason = reason == null ? "" : reason;
 		checkpoints.add(new Checkpoint("failure", reason == null ? "" : reason));
 	}
 

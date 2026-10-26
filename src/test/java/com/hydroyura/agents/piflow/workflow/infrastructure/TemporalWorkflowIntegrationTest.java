@@ -22,6 +22,7 @@ import com.hydroyura.agents.piflow.workspace.api.WorkspaceState;
 import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.PiFlowWorkflow;
 import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.PiFlowWorkflowImpl;
 import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.WorkflowAnalysisActivitiesImpl;
+import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.WorkflowAnalysisResult;
 import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.WorkflowInput;
 import com.hydroyura.agents.piflow.workflow.infrastructure.temporal.WorkflowPreparationActivitiesImpl;
 
@@ -48,6 +49,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class TemporalWorkflowIntegrationTest {
 
 	private static final String ARTIFACT = ".pi-flow/analysis/analyst.md";
+	private static final String BRANCH = ".pi-flow/analysis/branch.txt";
 
 	private TestWorkflowEnvironment testEnv;
 
@@ -82,9 +84,10 @@ class TemporalWorkflowIntegrationTest {
 		when(workspaceOperations.prepare(any())).thenReturn(preparedWorkspace());
 		when(agentOperations.run(any())).thenReturn(successResult());
 
-		String result = workflowStub().execute(input());
+		WorkflowAnalysisResult result = workflowStub().execute(input());
 
-		assertThat(result).isEqualTo(workspace.resolve(ARTIFACT).toString());
+		assertThat(result.workspacePath()).isEqualTo(workspace.toString());
+		assertThat(result.branchName()).isEqualTo("feature/issue-42");
 	}
 
 	@Test
@@ -135,5 +138,6 @@ class TemporalWorkflowIntegrationTest {
 		Path artifact = workspace.resolve(ARTIFACT);
 		Files.createDirectories(artifact.getParent());
 		Files.writeString(artifact, content);
+		Files.writeString(workspace.resolve(BRANCH), "feature/issue-42");
 	}
 }
