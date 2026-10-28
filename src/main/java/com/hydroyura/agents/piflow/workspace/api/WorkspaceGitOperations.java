@@ -12,4 +12,12 @@ public interface WorkspaceGitOperations {
 	 * @return результат коммита
 	 */
 	WorkspaceCommitResult commit(WorkspaceCommitCommand command);
+
+	/**
+	 * Публикует (push) локальную ветку в удалённый репозиторий {@code origin}.
+	 *
+	 * @param command параметры публикации
+	 * @return результат публикации
+	 */
+	WorkspacePushResult push(WorkspacePushCommand command);
 }

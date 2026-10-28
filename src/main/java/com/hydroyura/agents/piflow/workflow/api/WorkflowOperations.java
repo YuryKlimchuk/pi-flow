@@ -24,7 +24,7 @@ public interface WorkflowOperations {
 	WorkflowState getState(String workflowId);
 
 	/**
-	 * Продолжает Workflow после успешного анализа с предложенным именем ветки.
+	 * Продолжает Workflow на текущем ручном gate (анализ, проектирование или ревью).
 	 *
 	 * @param command команда продолжения
 	 * @return публичное состояние после перехода на следующий этап
@@ -32,10 +32,10 @@ public interface WorkflowOperations {
 	WorkflowState continueWorkflow(ContinueWorkflowCommand command);
 
 	/**
-	 * Перезапускает анализ Workflow с замечаниями пользователя.
+	 * Перезапускает текущий этап Workflow с замечаниями пользователя.
 	 *
-	 * @param command команда повторного анализа
-	 * @return публичное состояние после возврата к анализу
+	 * @param command команда повторного этапа
+	 * @return публичное состояние после возврата к повторному этапу
 	 */
 	WorkflowState rework(ReworkWorkflowCommand command);
 
@@ -45,14 +45,4 @@ public interface WorkflowOperations {
 	 * @return список компактных описаний workflow
 	 */
 	List<WorkflowSummary> listWorkflows();
-
-	/**
-	 * Создаёт итоговую ветку с именем, предложенным Analyst.
-	 */
-	WorkflowState createBranch(CreateBranchCommand command);
-
-	/**
-	 * Коммитит артефакты и публикует ветку в GitHub.
-	 */
-	WorkflowState push(PushWorkflowCommand command);
 }

@@ -3,17 +3,8 @@ package com.hydroyura.agents.piflow.workflow.application;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.hydroyura.agents.piflow.github.api.BranchOperations;
-import com.hydroyura.agents.piflow.github.api.BranchPublication;
-import com.hydroyura.agents.piflow.workspace.api.WorkspaceBranchCommand;
-import com.hydroyura.agents.piflow.workspace.api.WorkspaceBranchResult;
-import com.hydroyura.agents.piflow.workspace.api.WorkspaceCommitCommand;
-import com.hydroyura.agents.piflow.workspace.api.WorkspaceCommitResult;
-import com.hydroyura.agents.piflow.workspace.api.WorkspaceGitOperations;
 import com.hydroyura.agents.piflow.workspace.api.WorkspaceOperations;
 import com.hydroyura.agents.piflow.workflow.api.ContinueWorkflowCommand;
-import com.hydroyura.agents.piflow.workflow.api.CreateBranchCommand;
-import com.hydroyura.agents.piflow.workflow.api.PushWorkflowCommand;
 import com.hydroyura.agents.piflow.workflow.api.ReworkWorkflowCommand;
 import com.hydroyura.agents.piflow.workflow.api.StartWorkflowCommand;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowException;
@@ -21,36 +12,34 @@ import com.hydroyura.agents.piflow.workflow.api.WorkflowOperations;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStage;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowState;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowStatus;
+import com.hydroyura.agents.piflow.workflow.api.WorkflowStepInfo;
+import com.hydroyura.agents.piflow.workflow.api.WorkflowSummary;
 import com.hydroyura.agents.piflow.workflow.domain.IllegalWorkflowTransitionException;
 import com.hydroyura.agents.piflow.workflow.domain.Workflow;
 import com.hydroyura.agents.piflow.workflow.domain.WorkflowContext;
 import com.hydroyura.agents.piflow.workflow.domain.WorkflowId;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
  * Реализует публичный порт управления единым длительным Workflow.
  */
+@Slf4j
 @Service
 public class WorkflowService implements WorkflowOperations {
 
 	private final WorkflowExecutionPort executionPort;
 	private final WorkflowRepository repository;
 	private final WorkspaceOperations workspaceOperations;
-	private final WorkspaceGitOperations workspaceGitOperations;
-	private final BranchOperations branchOperations;
 
 	public WorkflowService(
 			WorkflowExecutionPort executionPort,
 			WorkflowRepository repository,
-			WorkspaceOperations workspaceOperations,
-			WorkspaceGitOperations workspaceGitOperations,
-			BranchOperations branchOperations) {
+			WorkspaceOperations workspaceOperations) {
 		this.executionPort = executionPort;
 		this.repository = repository;
 		this.workspaceOperations = workspaceOperations;
-		this.workspaceGitOperations = workspaceGitOperations;
-		this.branchOperations = branchOperations;
 	}
 
 	@Override
@@ -66,10 +55,13 @@ public class WorkflowService implements WorkflowOperations {
 			workflow.attachExecution(execution.executionId());
 			workflow.markRunning();
 			repository.save(workflow);
+			log.info("workflow started: workflowId={} owner={} repository={} issue={}",
+					command.workflowId(), command.owner(), command.repository(), command.issueNumber());
 			return toState(workflow);
 		} catch (WorkflowException e) {
 			workflow.fail("execution start failed");
 			repository.save(workflow);
+			log.error("workflow start failed: workflowId={} error={}", command.workflowId(), e.getMessage());
 			throw e;
 		}
 	}
@@ -91,7 +83,13 @@ public class WorkflowService implements WorkflowOperations {
 		Workflow workflow = repository.findById(new WorkflowId(command.workflowId()))
 				.orElseThrow(() -> WorkflowException.notFound("workflow not found: " + command.workflowId()));
 		try {
-			workflow.continueAfterAnalysis();
+			switch (workflow.currentStage()) {
+				case ANALYZING_REQUIREMENTS -> workflow.continueAfterAnalysis();
+				case DESIGNING_SOLUTION -> workflow.continueAfterDesign();
+				case REVIEWING -> workflow.approveReview();
+				default -> throw new IllegalWorkflowTransitionException(
+						"cannot continue from stage " + workflow.currentStage());
+			}
 		} catch (IllegalWorkflowTransitionException e) {
 			throw WorkflowException.illegalTransition(e.getMessage());
 		}
@@ -106,7 +104,14 @@ public class WorkflowService implements WorkflowOperations {
 		Workflow workflow = repository.findById(new WorkflowId(command.workflowId()))
 				.orElseThrow(() -> WorkflowException.notFound("workflow not found: " + command.workflowId()));
 		try {
-			workflow.rework(command.feedback());
+			switch (workflow.currentStage()) {
+				case ANALYZING_REQUIREMENTS -> workflow.rework(command.feedback());
+				case DESIGNING_SOLUTION -> workflow.reworkDesign(command.feedback());
+				case IMPLEMENTING -> workflow.reworkImplementation(command.feedback());
+				case REVIEWING -> workflow.reworkReview(command.feedback());
+				default -> throw new IllegalWorkflowTransitionException(
+						"cannot rework from stage " + workflow.currentStage());
+			}
 		} catch (IllegalWorkflowTransitionException e) {
 			throw WorkflowException.illegalTransition(e.getMessage());
 		}
@@ -116,80 +121,120 @@ public class WorkflowService implements WorkflowOperations {
 	}
 
 	@Override
-	public WorkflowState createBranch(CreateBranchCommand command) {
-		command.validate();
-		Workflow workflow = repository.findById(new WorkflowId(command.workflowId()))
-				.orElseThrow(() -> WorkflowException.notFound("workflow not found: " + command.workflowId()));
-		WorkspaceBranchResult result = workspaceOperations.createBranch(new WorkspaceBranchCommand(
-				command.workflowId(), workflow.context().repositoryUrl(), workflow.branchName()));
-		try {
-			workflow.createBranch();
-		} catch (IllegalWorkflowTransitionException e) {
-			throw WorkflowException.illegalTransition(e.getMessage());
-		}
-		repository.save(workflow);
-		return toState(workflow);
-	}
-
-	@Override
-	public WorkflowState push(PushWorkflowCommand command) {
-		command.validate();
-		Workflow workflow = repository.findById(new WorkflowId(command.workflowId()))
-				.orElseThrow(() -> WorkflowException.notFound("workflow not found: " + command.workflowId()));
-		try {
-			WorkspaceCommitResult commit = workspaceGitOperations.commit(new WorkspaceCommitCommand(
-					command.workflowId(), workflow.context().repositoryUrl(), "pi-flow: analysis and design",
-					java.util.List.of(".pi-flow/analysis/analyst.md", ".pi-flow/design/architect.md")));
-			BranchPublication publication = branchOperations.publishBranch(
-					workflow.context().owner(), workflow.context().repository(), workflow.branchName());
-			workflow.push(commit.commitId(), publication.url());
-			repository.save(workflow);
-			return toState(workflow);
-		} catch (RuntimeException e) {
-			workflow.fail("push failed: " + e.getMessage());
-			repository.save(workflow);
-			throw WorkflowException.orchestration("push failed: " + e.getMessage(), e);
-		}
-	}
-
-	@Override
-	public java.util.List<com.hydroyura.agents.piflow.workflow.api.WorkflowSummary> listWorkflows() {
+	public List<WorkflowSummary> listWorkflows() {
 		return repository.findAll().stream()
-				.map(w -> new com.hydroyura.agents.piflow.workflow.api.WorkflowSummary(
-						w.id().value(),
-						w.context().repositoryUrl(),
-						w.context().issueNumber(),
-						w.status().name(),
-						w.currentStage().name()))
+				.map(w -> {
+					try {
+						syncExecution(w);
+					} catch (RuntimeException ignored) {
+						// при недоступности Temporal/workspace оставляем последнее известное состояние.
+					}
+					return new WorkflowSummary(
+							w.id().value(),
+							w.context().repositoryUrl(),
+							w.context().issueNumber(),
+							w.status().name(),
+							w.currentStage().name());
+				})
 				.toList();
 	}
 
 	private void syncExecution(Workflow workflow) {
-		if (workflow.executionId() == null
-				|| workflow.status() == com.hydroyura.agents.piflow.workflow.domain.WorkflowStatus.FAILED) {
+		if (workflow.executionId() == null || isTerminal(workflow)) {
 			return;
 		}
 		WorkflowExecutionState state = executionPort.queryState(workflow.executionId());
-		if ("FAILED".equals(state.status())) {
-			workflow.fail(state.failureReason());
-			repository.save(workflow);
-			return;
-		}
-		if (!"WAITING_FOR_USER".equals(state.status())) {
-			return;
-		}
-		try {
-			if ("ANALYZING_REQUIREMENTS".equals(state.stage()) && workflow.analysisText() == null) {
-				String text = workspaceOperations.readAnalysisArtifact(state.workspacePath()).text();
-				workflow.recordAnalysis(state.branchName(), text);
-			} else if ("DESIGNING_SOLUTION".equals(state.stage()) && workflow.designText() == null) {
-				String text = workspaceOperations.readDesignArtifact(state.workspacePath()).text();
-				workflow.recordDesign(text);
+		switch (state.status()) {
+			case "FAILED" -> {
+				workflow.fail(state.failureReason());
+				repository.save(workflow);
+				log.info("workflow failed: workflowId={} reason={}", workflow.id().value(), state.failureReason());
 			}
+			case "CANCELLED" -> {
+				workflow.cancel();
+				repository.save(workflow);
+				log.info("workflow cancelled: workflowId={}", workflow.id().value());
+			}
+			case "COMPLETED" -> {
+				if (workflow.currentStage() == com.hydroyura.agents.piflow.workflow.domain.WorkflowStage.READY_FOR_PULL_REQUEST) {
+					workflow.finalize(state.commitId(), state.branchUrl(), state.prNumber(), state.prUrl());
+					repository.save(workflow);
+					log.info("workflow completed: workflowId={} pr={} url={}",
+							workflow.id().value(), state.prNumber(), state.prUrl());
+				}
+			}
+			case "WAITING_FOR_USER" -> applyWaiting(workflow, state);
+			case "RUNNING" -> applyRunning(workflow, state);
+			default -> {
+				// неизвестный статус не меняет доменное состояние.
+			}
+		}
+	}
+
+	private void applyWaiting(Workflow workflow, WorkflowExecutionState state) {
+		switch (state.stage()) {
+			case "ANALYZING_REQUIREMENTS" -> {
+				if (workflow.analysisText() == null) {
+					workflow.recordAnalysis(state.branchName(), analysisArtifact(state));
+					repository.save(workflow);
+					log.info("analysis recorded: workflowId={} branch={}", workflow.id().value(), state.branchName());
+				}
+			}
+			case "DESIGNING_SOLUTION" -> {
+				if (workflow.designText() == null) {
+					workflow.recordDesign(designArtifact(state));
+					repository.save(workflow);
+					log.info("design recorded: workflowId={}", workflow.id().value());
+				}
+			}
+			case "IMPLEMENTING" -> {
+				if (workflow.status() == com.hydroyura.agents.piflow.workflow.domain.WorkflowStatus.RUNNING) {
+					workflow.recordImplementation(state.implementationRunId(), state.implementationDiagnostics(), false);
+					repository.save(workflow);
+					log.info("implementation failed, waiting for rework: workflowId={} diagnostics={}",
+							workflow.id().value(), state.implementationDiagnostics());
+				}
+			}
+			case "REVIEWING" -> {
+				if (workflow.reviewText() == null) {
+					workflow.recordReview(state.reviewRunId(), state.reviewText());
+					repository.save(workflow);
+					log.info("review recorded: workflowId={}", workflow.id().value());
+				}
+			}
+			default -> {
+				// прочие этапы не имеют ручного gate.
+			}
+		}
+	}
+
+	private void applyRunning(Workflow workflow, WorkflowExecutionState state) {
+		if ("REVIEWING".equals(state.stage())
+				&& workflow.currentStage() == com.hydroyura.agents.piflow.workflow.domain.WorkflowStage.IMPLEMENTING) {
+			workflow.recordImplementation(state.implementationRunId(), state.implementationDiagnostics(), true);
 			repository.save(workflow);
+		}
+	}
+
+	private boolean isTerminal(Workflow workflow) {
+		return workflow.status() == com.hydroyura.agents.piflow.workflow.domain.WorkflowStatus.FAILED
+				|| workflow.status() == com.hydroyura.agents.piflow.workflow.domain.WorkflowStatus.COMPLETED
+				|| workflow.status() == com.hydroyura.agents.piflow.workflow.domain.WorkflowStatus.CANCELLED;
+	}
+
+	private String analysisArtifact(WorkflowExecutionState state) {
+		try {
+			return workspaceOperations.readAnalysisArtifact(state.workspacePath()).text();
 		} catch (RuntimeException e) {
-			workflow.fail("result unavailable: " + e.getMessage());
-			repository.save(workflow);
+			throw WorkflowException.orchestration("analysis artifact unavailable: " + e.getMessage(), e);
+		}
+	}
+
+	private String designArtifact(WorkflowExecutionState state) {
+		try {
+			return workspaceOperations.readDesignArtifact(state.workspacePath()).text();
+		} catch (RuntimeException e) {
+			throw WorkflowException.orchestration("design artifact unavailable: " + e.getMessage(), e);
 		}
 	}
 
@@ -202,9 +247,9 @@ public class WorkflowService implements WorkflowOperations {
 		for (com.hydroyura.agents.piflow.workflow.domain.WorkflowStage stage : workflow.completedStages()) {
 			completed.add(WorkflowStage.valueOf(stage.name()));
 		}
-		List<com.hydroyura.agents.piflow.workflow.api.WorkflowStepInfo> timeline = new ArrayList<>();
+		List<WorkflowStepInfo> timeline = new ArrayList<>();
 		for (com.hydroyura.agents.piflow.workflow.domain.CompletedWorkflowStep step : workflow.timeline()) {
-			timeline.add(new com.hydroyura.agents.piflow.workflow.api.WorkflowStepInfo(
+			timeline.add(new WorkflowStepInfo(
 					step.stage(), step.role(), step.action(), step.result(), step.runId()));
 		}
 		return new WorkflowState(
@@ -218,10 +263,15 @@ public class WorkflowService implements WorkflowOperations {
 				workflow.analysisText(),
 				workflow.branchName(),
 				workflow.designText(),
+				workflow.implementationRunId(),
+				workflow.implementationDiagnostics(),
+				workflow.reviewText(),
+				workflow.reviewRunId(),
 				workflow.failureReason(),
 				List.copyOf(timeline),
-				workflow.branchCreated(),
 				workflow.commitId(),
-				workflow.branchUrl());
+				workflow.branchUrl(),
+				workflow.prNumber(),
+				workflow.prUrl());
 	}
 }

@@ -2,15 +2,17 @@ package com.hydroyura.agents.piflow.web;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 import com.hydroyura.agents.piflow.workflow.api.ContinueWorkflowCommand;
-import com.hydroyura.agents.piflow.workflow.api.CreateBranchCommand;
-import com.hydroyura.agents.piflow.workflow.api.PushWorkflowCommand;
 import com.hydroyura.agents.piflow.workflow.api.ReworkWorkflowCommand;
 import com.hydroyura.agents.piflow.workflow.api.StartWorkflowCommand;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowException;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowOperations;
+import com.hydroyura.agents.piflow.workflow.api.WorkflowStage;
 import com.hydroyura.agents.piflow.workflow.api.WorkflowState;
+import com.hydroyura.agents.piflow.workflow.api.WorkflowStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -65,6 +67,7 @@ public class WorkflowController {
 		try {
 			WorkflowState state = workflowOperations.getState(workflowId);
 			model.addAttribute("state", state);
+			model.addAttribute("stages", stageViews(state));
 			model.addAttribute("error", null);
 		} catch (WorkflowException e) {
 			model.addAttribute("state", null);
@@ -74,9 +77,8 @@ public class WorkflowController {
 	}
 
 	@PostMapping("/workflows/continue")
-	public String continueWorkflow(@RequestParam("workflowId") String workflowId,
-			@RequestParam("branchName") String branchName) {
-		workflowOperations.continueWorkflow(new ContinueWorkflowCommand(workflowId, branchName));
+	public String continueWorkflow(@RequestParam("workflowId") String workflowId) {
+		workflowOperations.continueWorkflow(new ContinueWorkflowCommand(workflowId));
 		return "redirect:/workflows/track?workflowId=" + encode(workflowId);
 	}
 
@@ -94,38 +96,45 @@ public class WorkflowController {
 		}
 	}
 
-	@PostMapping("/workflows/create-branch")
-	public String createBranch(@RequestParam("workflowId") String workflowId, Model model) {
-		try {
-			workflowOperations.createBranch(new CreateBranchCommand(workflowId));
-			return "redirect:/workflows/track?workflowId=" + encode(workflowId);
-		} catch (WorkflowException e) {
-			model.addAttribute("workflowId", workflowId);
-			model.addAttribute("state", currentState(workflowId));
-			model.addAttribute("error", message(e));
-			return "workflow-status";
-		}
-	}
-
-	@PostMapping("/workflows/push")
-	public String push(@RequestParam("workflowId") String workflowId, Model model) {
-		try {
-			workflowOperations.push(new PushWorkflowCommand(workflowId));
-			return "redirect:/workflows/track?workflowId=" + encode(workflowId);
-		} catch (WorkflowException e) {
-			model.addAttribute("workflowId", workflowId);
-			model.addAttribute("state", currentState(workflowId));
-			model.addAttribute("error", message(e));
-			return "workflow-status";
-		}
-	}
-
 	private WorkflowState currentState(String workflowId) {
 		try {
 			return workflowOperations.getState(workflowId);
 		} catch (WorkflowException e) {
 			return null;
 		}
+	}
+
+	private List<StageView> stageViews(WorkflowState state) {
+		List<String> completed = state.completedStages().stream().map(Enum::name).toList();
+		List<StageView> views = new ArrayList<>();
+		for (WorkflowStage stage : WorkflowStage.values()) {
+			String css;
+			if (completed.contains(stage.name())) {
+				css = "list-group-item-success";
+			} else if (stage == state.currentStage() && state.status() == WorkflowStatus.FAILED) {
+				css = "list-group-item-danger";
+			} else if (stage == state.currentStage()) {
+				css = "list-group-item-primary";
+			} else {
+				css = "list-group-item-secondary";
+			}
+			views.add(new StageView(stage.name(), stageLabel(stage), css));
+		}
+		return views;
+	}
+
+	private String stageLabel(WorkflowStage stage) {
+		return switch (stage) {
+			case ANALYZING_REQUIREMENTS -> "Анализ";
+			case DESIGNING_SOLUTION -> "Проектирование";
+			case IMPLEMENTING -> "Реализация";
+			case REVIEWING -> "Ревью";
+			case READY_FOR_PULL_REQUEST -> "PR";
+		};
+	}
+
+	/** Компактное представление этапа для pipeline-вида. */
+	public record StageView(String key, String label, String cssClass) {
 	}
 
 	private String encode(String value) {

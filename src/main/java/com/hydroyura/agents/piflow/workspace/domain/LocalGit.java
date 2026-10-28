@@ -35,4 +35,12 @@ public interface LocalGit {
 	void checkout(Path directory, String branch);
 
 	String commit(Path directory, String message, List<String> relativePaths);
+
+	/**
+	 * Публикует локальную ветку в удалённый репозиторий {@code origin}.
+	 *
+	 * @param directory локальная рабочая копия
+	 * @param branch имя ветки для публикации
+	 */
+	void push(Path directory, String branch);
 }

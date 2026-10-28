@@ -10,6 +10,7 @@ import com.hydroyura.agents.piflow.agent.api.AgentRole;
 import com.hydroyura.agents.piflow.agent.api.AgentRunResult;
 import com.hydroyura.agents.piflow.agent.api.AgentRunStatus;
 import com.hydroyura.agents.piflow.agent.api.StartAgentCommand;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Реализация activity анализа проекта через публичный контракт модуля {@code agent}.
@@ -20,6 +21,7 @@ import com.hydroyura.agents.piflow.agent.api.StartAgentCommand;
  * ветки. Не выполняет запуск процессов напрямую и не содержит Temporal-логики
  * вне объявления activity.</p>
  */
+@Slf4j
 public class WorkflowAnalysisActivitiesImpl implements WorkflowAnalysisActivities {
 
 	static final String ARTIFACT_RELATIVE_PATH = ".pi-flow/analysis/analyst.md";
@@ -48,7 +50,8 @@ public class WorkflowAnalysisActivitiesImpl implements WorkflowAnalysisActivitie
 		try {
 			result = agentOperations.run(command);
 		} catch (RuntimeException e) {
-			throw WorkflowAnalysisException.agentFailed("agent run failed: " + e.getMessage());
+			log.error("analysis activity failed: workflowId={}", input.workflowId(), e);
+			throw WorkflowAnalysisException.agentFailed("agent run failed: " + e.getMessage(), e);
 		}
 
 		validateRunResult(result);

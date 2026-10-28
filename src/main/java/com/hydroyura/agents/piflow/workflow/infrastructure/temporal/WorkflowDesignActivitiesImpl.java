@@ -10,10 +10,12 @@ import com.hydroyura.agents.piflow.agent.api.AgentRole;
 import com.hydroyura.agents.piflow.agent.api.AgentRunResult;
 import com.hydroyura.agents.piflow.agent.api.AgentRunStatus;
 import com.hydroyura.agents.piflow.agent.api.StartAgentCommand;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Реализация activity проектирования через роль {@code ARCHITECT}.
  */
+@Slf4j
 public class WorkflowDesignActivitiesImpl implements WorkflowDesignActivities {
 
 	static final String DESIGN_RELATIVE_PATH = ".pi-flow/design/architect.md";
@@ -41,7 +43,8 @@ public class WorkflowDesignActivitiesImpl implements WorkflowDesignActivities {
 		try {
 			result = agentOperations.run(command);
 		} catch (RuntimeException e) {
-			throw WorkflowAnalysisException.agentFailed("architect run failed: " + e.getMessage());
+			log.error("design activity failed: workflowId={}", input.workflowId(), e);
+			throw WorkflowAnalysisException.agentFailed("architect run failed: " + e.getMessage(), e);
 		}
 
 		validateRunResult(result);

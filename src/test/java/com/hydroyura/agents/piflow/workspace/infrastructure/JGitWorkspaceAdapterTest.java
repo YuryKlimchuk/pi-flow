@@ -135,4 +135,27 @@ class JGitWorkspaceAdapterTest {
 		assertThat(commitId).isNotBlank();
 		assertThat(adapter.isClean(target)).isTrue();
 	}
+
+	@Test
+	void push_shouldPublishBranchToOrigin() throws Exception {
+		Path remote = tempDir.resolve("remote.git");
+		try (Git ignored = Git.init().setDirectory(remote.toFile()).setBare(true).call()) {
+			// seed bare remote from source
+			try (Git git = Git.open(source.toFile())) {
+				git.push().setRemote(remote.toUri().toString())
+						.add("refs/heads/" + branch + ":refs/heads/" + branch).call();
+			}
+		}
+
+		Path target = tempDir.resolve("clone");
+		adapter.cloneRepository(remote.toUri().toString(), target, branch);
+		adapter.createBranch(target, "feature/x", branch);
+		adapter.checkout(target, "feature/x");
+		Files.writeString(target.resolve("FEATURE.md"), "feature");
+		adapter.commit(target, "feature", List.of("FEATURE.md"));
+
+		adapter.push(target, "feature/x");
+
+		assertThat(adapter.resolveBaseBranch(remote.toUri().toString(), "feature/x")).isEqualTo("feature/x");
+	}
 }

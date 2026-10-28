@@ -19,6 +19,7 @@ import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.revwalk.RevCommit;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -26,6 +27,9 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class JGitWorkspaceAdapter implements LocalGit {
+
+	@Value("${workspace.push-token:}")
+	private String pushToken;
 
 	@Override
 	public void cloneRepository(String repositoryUrl, Path directory, String targetBranch) {
@@ -171,6 +175,22 @@ public class JGitWorkspaceAdapter implements LocalGit {
 			return commit != null ? commit.name() : headId(git);
 		} catch (GitAPIException | IOException e) {
 			throw WorkspaceGitException.git("failed to commit changes: " + directory, e);
+		}
+	}
+
+	@Override
+	public void push(Path directory, String branch) {
+		try (Git git = Git.open(directory.toFile())) {
+			var push = git.push()
+					.setRemote("origin")
+					.setRefSpecs(new org.eclipse.jgit.transport.RefSpec(
+							"refs/heads/" + branch + ":refs/heads/" + branch));
+			if (pushToken != null && !pushToken.isBlank()) {
+				push.setCredentialsProvider(new org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider(pushToken, ""));
+			}
+			push.call();
+		} catch (GitAPIException | IOException e) {
+			throw WorkspaceGitException.git("failed to push branch " + branch + ": " + e.getMessage(), e);
 		}
 	}
 

@@ -6,6 +6,8 @@ import com.hydroyura.agents.piflow.workspace.api.WorkspaceCommitCommand;
 import com.hydroyura.agents.piflow.workspace.api.WorkspaceCommitResult;
 import com.hydroyura.agents.piflow.workspace.api.WorkspaceException;
 import com.hydroyura.agents.piflow.workspace.api.WorkspaceGitOperations;
+import com.hydroyura.agents.piflow.workspace.api.WorkspacePushCommand;
+import com.hydroyura.agents.piflow.workspace.api.WorkspacePushResult;
 import com.hydroyura.agents.piflow.workspace.domain.LocalGit;
 import com.hydroyura.agents.piflow.workspace.domain.WorkspaceGitException;
 import com.hydroyura.agents.piflow.workspace.domain.WorkspaceLayout;
@@ -34,6 +36,22 @@ public class WorkspaceGitService implements WorkspaceGitOperations {
 			String branch = localGit.currentBranch(directory);
 			String commitId = localGit.commit(directory, command.message(), command.relativePaths());
 			return new WorkspaceCommitResult(directory, branch, commitId);
+		} catch (WorkspaceGitException e) {
+			throw WorkspaceErrors.map(e);
+		}
+	}
+
+	@Override
+	public WorkspacePushResult push(WorkspacePushCommand command) {
+		command.validate();
+		Path directory = layout.repositoryDirectory(command.repositoryUrl());
+
+		try {
+			if (!localGit.isRepository(directory)) {
+				throw WorkspaceException.corrupt("directory is not a valid git repository: " + directory);
+			}
+			localGit.push(directory, command.branch());
+			return new WorkspacePushResult(directory, command.branch());
 		} catch (WorkspaceGitException e) {
 			throw WorkspaceErrors.map(e);
 		}

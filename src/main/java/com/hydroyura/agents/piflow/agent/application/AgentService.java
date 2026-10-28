@@ -16,11 +16,13 @@ import com.hydroyura.agents.piflow.agent.domain.AgentProcessResult;
 import com.hydroyura.agents.piflow.agent.domain.AgentProcessRunner;
 import com.hydroyura.agents.piflow.agent.domain.AgentProcessStatus;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
  * Реализует публичный порт запуска задачи агента через внутренний порт запуска процесса.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AgentService implements AgentOperations {
@@ -33,12 +35,21 @@ public class AgentService implements AgentOperations {
 		validateWorkingDirectory(command.workingDirectory());
 
 		String runId = UUID.randomUUID().toString();
+		log.info("agent run started: runId={} role={} workingDirectory={}",
+				runId, command.role(), command.workingDirectory());
+		log.debug("agent request: runId={} instruction={} inputData={} context={} feedback={}",
+				runId, command.instruction(), command.inputData(), command.context(), command.feedback());
 		AgentProcessRequest request = toRequest(command, runId);
 
 		try {
 			AgentProcessResult result = runner.execute(request);
+			log.info("agent run finished: runId={} status={} exitCode={}",
+					runId, result.status(), result.exitCode());
+			log.debug("agent response: runId={} stdout={} stderr={}",
+					runId, result.stdout(), result.stderr());
 			return toResult(command, result);
 		} catch (AgentProcessException e) {
+			log.warn("agent run failed: runId={} error={}", runId, e.getMessage(), e);
 			throw AgentErrors.map(e);
 		}
 	}

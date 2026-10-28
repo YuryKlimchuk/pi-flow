@@ -76,6 +76,15 @@ public class WorkspaceService implements WorkspaceOperations {
 	}
 
 	@Override
+	public String resolveBaseBranch(String repositoryUrl, String preferredBranch) {
+		if (repositoryUrl == null || repositoryUrl.isBlank()) {
+			throw WorkspaceException.validation("repositoryUrl must not be blank");
+		}
+		String preferred = preferredBranch == null || preferredBranch.isBlank() ? "master" : preferredBranch;
+		return localGit.resolveBaseBranch(repositoryUrl, preferred);
+	}
+
+	@Override
 	public WorkspaceBranchResult createBranch(WorkspaceBranchCommand command) {
 		command.validate();
 		Path directory = layout.repositoryDirectory(command.repositoryUrl());

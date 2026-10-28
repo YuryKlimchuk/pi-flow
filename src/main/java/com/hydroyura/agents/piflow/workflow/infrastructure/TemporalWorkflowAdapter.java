@@ -58,8 +58,11 @@ public class TemporalWorkflowAdapter implements WorkflowExecutionPort {
 		WorkflowStub stub = workflowClient.newUntypedWorkflowStub(executionId);
 		try {
 			WorkflowStageState state = stub.query("state", WorkflowStageState.class);
-			return new WorkflowExecutionState(state.stage(), state.status(), state.workspacePath(),
-					state.branchName(), state.failureReason());
+			return new WorkflowExecutionState(
+					state.stage(), state.status(), state.workspacePath(), state.branchName(), state.failureReason(),
+					state.implementationRunId(), state.implementationDiagnostics(),
+					state.reviewRunId(), state.reviewText(),
+					state.commitId(), state.branchUrl(), state.prNumber(), state.prUrl());
 		} catch (io.temporal.client.WorkflowException e) {
 			throw WorkflowException.execution("temporal query failed: " + e.getMessage(), e);
 		}

@@ -23,24 +23,42 @@
         <p th:text="${state.errorMessage}" class="mb-0"></p>
     </div>
 
-    <div th:if="${state != null && state.timeline != null}" class="mb-4">
-        <h5>Выполненные шаги</h5>
-        <div class="card mb-2" th:each="step : ${state.timeline}">
-            <div class="card-body py-2">
-                <span class="badge bg-secondary" th:text="${step.role}"></span>
-                <span class="badge bg-light text-dark" th:text="${step.action}"></span>
-                <span class="text-muted small ms-2" th:text="${step.stage}"></span>
-                <pre class="bg-white border rounded p-2 mt-2 mb-0" th:text="${step.result}"></pre>
-            </div>
+    <div th:if="${stages != null && !stages.isEmpty()}" class="mb-4">
+        <h5>Этапы</h5>
+        <ul class="list-group list-group-horizontal flex-wrap">
+            <li class="list-group-item" th:each="s : ${stages}" th:classappend="${s.cssClass}" th:text="${s.label}"></li>
+        </ul>
+        <div class="text-muted small mt-1">
+            <span class="text-secondary">— не начат</span> ·
+            <span class="text-primary">— в работе</span> ·
+            <span class="text-success">— завершён</span> ·
+            <span class="text-danger">— ошибка</span>
         </div>
     </div>
 
-    <div th:if="${state != null && state.status.name() != 'FAILED' && state.analysisText == null && state.designText == null}" class="card">
+    <div th:if="${state != null && state.timeline != null && !state.timeline.isEmpty()}" class="mb-4"
+         id="timeline" th:attr="data-workflow-id=${state.workflowId}">
+        <h5>Выполненные шаги</h5>
+        <details class="card mb-2 timeline-step" th:each="step, iter : ${state.timeline}"
+                 th:attr="data-step-key=${iter.index}">
+            <summary class="card-body py-2" style="cursor:pointer;">
+                <span class="badge bg-secondary" th:text="${step.role}"></span>
+                <span class="badge bg-light text-dark" th:text="${step.action}"></span>
+                <span class="text-muted small ms-2" th:text="${step.stage}"></span>
+                <span class="text-muted small ms-2" th:if="${step.runId != null}" th:text="'run: ' + ${step.runId}"></span>
+            </summary>
+            <div class="card-body py-2 border-top">
+                <pre class="bg-white border rounded p-2 mb-0" th:text="${step.result}"></pre>
+            </div>
+        </details>
+    </div>
+
+    <div th:if="${state != null && (state.status.name() == 'RUNNING' || state.status.name() == 'CREATED')}" class="card">
         <div class="card-body text-center py-5">
             <div class="spinner-border text-primary" role="status">
                 <span class="visually-hidden">Выполняется…</span>
             </div>
-            <p class="mt-3 mb-0" th:text="${state.currentStage.name() == 'DESIGNING_SOLUTION'} ? 'Проектирование решения выполняется…' : 'Анализ задачи выполняется…'"></p>
+            <p class="mt-3 mb-0" th:text="${state.currentStage.name() == 'DESIGNING_SOLUTION' ? 'Проектирование решения выполняется…' : (state.currentStage.name() == 'IMPLEMENTING' ? 'Реализация выполняется…' : (state.currentStage.name() == 'REVIEWING' ? 'Ревью выполняется…' : (state.currentStage.name() == 'READY_FOR_PULL_REQUEST' ? 'Финализация выполняется…' : 'Анализ задачи выполняется…')))}"></p>
         </div>
     </div>
 
@@ -54,7 +72,6 @@
             <pre class="bg-white border rounded p-3" th:text="${state.analysisText}"></pre>
             <form th:action="@{/workflows/continue}" method="post" class="d-inline">
                 <input type="hidden" name="workflowId" th:value="${state.workflowId}">
-                <input type="hidden" name="branchName" th:value="${state.branchName}">
                 <button type="submit" class="btn btn-primary">Продолжить</button>
             </form>
             <details class="d-inline ms-2">
@@ -72,9 +89,9 @@
         <div class="card-body">
             <h5 class="card-title text-success">Проектирование завершено — proposal</h5>
             <pre class="bg-white border rounded p-3" th:text="${state.designText}"></pre>
-            <form th:action="@{/workflows/create-branch}" method="post" class="d-inline">
+            <form th:action="@{/workflows/continue}" method="post" class="d-inline">
                 <input type="hidden" name="workflowId" th:value="${state.workflowId}">
-                <button type="submit" class="btn btn-primary">Создать ветку</button>
+                <button type="submit" class="btn btn-primary">Продолжить к реализации</button>
             </form>
             <details class="d-inline ms-2">
                 <summary class="btn btn-outline-secondary">Исправить</summary>
@@ -87,14 +104,37 @@
         </div>
     </div>
 
-    <div th:if="${state != null && state.branchCreated && state.commitId == null}" class="card border-info mb-3">
+    <div th:if="${state != null && state.status.name() == 'WAITING_FOR_USER' && state.currentStage.name() == 'IMPLEMENTING'}" class="card border-warning mb-3">
         <div class="card-body">
-            <h5 class="card-title">Ветка создана</h5>
-            <code th:text="${state.branchName}"></code>
-            <form th:action="@{/workflows/push}" method="post" class="mt-2">
+            <h5 class="card-title text-warning">Реализация требует доработки</h5>
+            <pre class="bg-white border rounded p-3" th:text="${state.implementationDiagnostics}"></pre>
+            <details>
+                <summary class="btn btn-outline-secondary">Исправить реализацию</summary>
+                <form th:action="@{/workflows/rework}" method="post" class="mt-2">
+                    <input type="hidden" name="workflowId" th:value="${state.workflowId}">
+                    <textarea class="form-control" name="feedback" rows="3" required></textarea>
+                    <button type="submit" class="btn btn-primary mt-2">Отправить замечания</button>
+                </form>
+            </details>
+        </div>
+    </div>
+
+    <div th:if="${state != null && state.reviewText != null}" class="card border-success mb-3">
+        <div class="card-body">
+            <h5 class="card-title text-success">Ревью завершено — ожидание вашего решения</h5>
+            <pre class="bg-white border rounded p-3" th:text="${state.reviewText}"></pre>
+            <form th:action="@{/workflows/continue}" method="post" class="d-inline">
                 <input type="hidden" name="workflowId" th:value="${state.workflowId}">
-                <button type="submit" class="btn btn-primary">Запушить изменения</button>
+                <button type="submit" class="btn btn-primary">Одобрить</button>
             </form>
+            <details class="d-inline ms-2">
+                <summary class="btn btn-outline-secondary">Вернуть в реализацию</summary>
+                <form th:action="@{/workflows/rework}" method="post" class="mt-2">
+                    <input type="hidden" name="workflowId" th:value="${state.workflowId}">
+                    <textarea class="form-control" name="feedback" rows="3" required></textarea>
+                    <button type="submit" class="btn btn-primary mt-2">Отправить замечания</button>
+                </form>
+            </details>
         </div>
     </div>
 
@@ -106,12 +146,37 @@
                 <dd class="col-sm-9"><code th:text="${state.commitId}"></code></dd>
                 <dt class="col-sm-3">Ветка</dt>
                 <dd class="col-sm-9"><a th:href="${state.branchUrl}" th:text="${state.branchUrl}"></a></dd>
+                <dt class="col-sm-3">Pull Request</dt>
+                <dd class="col-sm-9"><a th:href="${state.prUrl}" th:text="'#' + ${state.prNumber}"></a></dd>
             </dl>
         </div>
     </div>
 </main>
 <script th:replace="~{fragments :: scripts}"></script>
-<script th:if="${state != null && state.status.name() != 'FAILED' && state.analysisText == null && state.designText == null}">
+<script>
+    (function () {
+        var timeline = document.getElementById('timeline');
+        if (!timeline) return;
+        var workflowId = timeline.getAttribute('data-workflow-id');
+        var prefix = 'pi-flow-step-open-' + workflowId + '-';
+        try {
+            timeline.querySelectorAll('details.timeline-step').forEach(function (d) {
+                var id = d.getAttribute('data-step-key');
+                if (id && localStorage.getItem(prefix + id) === '1') {
+                    d.open = true;
+                }
+                d.addEventListener('toggle', function () {
+                    if (id) {
+                        localStorage.setItem(prefix + id, d.open ? '1' : '0');
+                    }
+                });
+            });
+        } catch (e) {
+            /* localStorage недоступен — состояние не сохраняется */
+        }
+    })();
+</script>
+<script th:if="${state != null && (state.status.name() == 'RUNNING' || state.status.name() == 'CREATED')}">
     setTimeout(function () { location.reload(); }, 2000);
 </script>
 </body>

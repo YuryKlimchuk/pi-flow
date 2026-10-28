@@ -33,18 +33,11 @@ class WorkflowServiceTest {
 	@Mock
 	private WorkspaceOperations workspaceOperations;
 
-	@Mock
-	private com.hydroyura.agents.piflow.workspace.api.WorkspaceGitOperations workspaceGitOperations;
-
-	@Mock
-	private com.hydroyura.agents.piflow.github.api.BranchOperations branchOperations;
-
 	private WorkflowService service;
 
 	@BeforeEach
 	void setUp() {
-		service = new WorkflowService(executionPort, new InMemoryWorkflowRepository(), workspaceOperations,
-				workspaceGitOperations, branchOperations);
+		service = new WorkflowService(executionPort, new InMemoryWorkflowRepository(), workspaceOperations);
 	}
 
 	@Test
@@ -103,7 +96,7 @@ class WorkflowServiceTest {
 	void continueWorkflow_shouldSignalAndAdvanceStage() {
 		recordAnalysis();
 
-		WorkflowState state = service.continueWorkflow(new ContinueWorkflowCommand("wf-1", "feature/issue-42"));
+		WorkflowState state = service.continueWorkflow(new ContinueWorkflowCommand("wf-1"));
 
 		assertThat(state.currentStage()).isEqualTo(WorkflowStage.DESIGNING_SOLUTION);
 		assertThat(state.analysisText()).isNull();
@@ -130,6 +123,101 @@ class WorkflowServiceTest {
 
 		assertThat(error.errorType()).isEqualTo(WorkflowException.ErrorType.VALIDATION);
 		verify(executionPort, never()).reworkStage(any(), any());
+	}
+
+	@Test
+	void getState_whenCompleted_shouldFinalizeWithPr() {
+		advanceToReadyForPullRequest();
+		when(executionPort.queryState("wf-1")).thenReturn(new WorkflowExecutionState(
+				"READY_FOR_PULL_REQUEST", "COMPLETED", "/ws", "feature/issue-42", null,
+				"run-1", "build ok", "run-2", "ok", "commit-1", "https://tree", 7, "https://pr"));
+
+		WorkflowState state = service.getState("wf-1");
+
+		assertThat(state.status()).isEqualTo(WorkflowStatus.COMPLETED);
+		assertThat(state.commitId()).isEqualTo("commit-1");
+		assertThat(state.prNumber()).isEqualTo(7);
+		assertThat(state.prUrl()).isEqualTo("https://pr");
+	}
+
+	@Test
+	void getState_whenRunningReviewing_shouldRecordImplementationSuccess() {
+		advanceToImplementation();
+		when(executionPort.queryState("wf-1")).thenReturn(new WorkflowExecutionState(
+				"REVIEWING", "RUNNING", "/ws", null, null, "run-1", "build ok", null, null, null, null, 0, null));
+
+		WorkflowState state = service.getState("wf-1");
+
+		assertThat(state.currentStage()).isEqualTo(WorkflowStage.REVIEWING);
+		assertThat(state.implementationDiagnostics()).isEqualTo("build ok");
+	}
+
+	@Test
+	void getState_whenWaitingReview_shouldRecordReview() {
+		advanceToImplementation();
+		when(executionPort.queryState("wf-1")).thenReturn(new WorkflowExecutionState(
+				"REVIEWING", "RUNNING", "/ws", null, null, "run-1", "build ok", null, null, null, null, 0, null));
+		service.getState("wf-1");
+		when(executionPort.queryState("wf-1")).thenReturn(new WorkflowExecutionState(
+				"REVIEWING", "WAITING_FOR_USER", "/ws", null, null, "run-1", "build ok", "run-2", "ok", null, null, 0, null));
+
+		WorkflowState state = service.getState("wf-1");
+
+		assertThat(state.status()).isEqualTo(WorkflowStatus.WAITING_FOR_USER);
+		assertThat(state.reviewText()).isEqualTo("ok");
+	}
+
+	@Test
+	void continueWorkflow_whenReviewing_shouldAdvanceToReadyForPullRequest() {
+		advanceToReviewWaiting();
+		org.mockito.Mockito.clearInvocations(executionPort);
+
+		WorkflowState state = service.continueWorkflow(new ContinueWorkflowCommand("wf-1"));
+
+		assertThat(state.currentStage()).isEqualTo(WorkflowStage.READY_FOR_PULL_REQUEST);
+		verify(executionPort).continueStage("wf-1");
+	}
+
+	@Test
+	void rework_whenImplementation_shouldSignal() {
+		advanceToImplementation();
+		when(executionPort.queryState("wf-1")).thenReturn(new WorkflowExecutionState(
+				"IMPLEMENTING", "WAITING_FOR_USER", "/ws", null, null, "run-1", "build failed", null, null, null, null, 0, null));
+		service.getState("wf-1");
+
+		WorkflowState state = service.rework(new ReworkWorkflowCommand("wf-1", "исправь сборку"));
+
+		assertThat(state.currentStage()).isEqualTo(WorkflowStage.IMPLEMENTING);
+		verify(executionPort).reworkStage("wf-1", "исправь сборку");
+	}
+
+	private void advanceToImplementation() {
+		startWorkflow();
+		when(executionPort.queryState("wf-1")).thenReturn(new WorkflowExecutionState(
+				"ANALYZING_REQUIREMENTS", "WAITING_FOR_USER", "/ws", "feature/issue-42", null));
+		when(workspaceOperations.readAnalysisArtifact("/ws")).thenReturn(new WorkspaceArtifactResult("a", "/ws/x", 1));
+		service.getState("wf-1");
+		service.continueWorkflow(new ContinueWorkflowCommand("wf-1"));
+		when(executionPort.queryState("wf-1")).thenReturn(new WorkflowExecutionState(
+				"DESIGNING_SOLUTION", "WAITING_FOR_USER", "/ws", null, null));
+		when(workspaceOperations.readDesignArtifact("/ws")).thenReturn(new WorkspaceArtifactResult("d", "/ws/y", 1));
+		service.getState("wf-1");
+		service.continueWorkflow(new ContinueWorkflowCommand("wf-1"));
+	}
+
+	private void advanceToReviewWaiting() {
+		advanceToImplementation();
+		when(executionPort.queryState("wf-1")).thenReturn(new WorkflowExecutionState(
+				"REVIEWING", "RUNNING", "/ws", null, null, "run-1", "build ok", null, null, null, null, 0, null));
+		service.getState("wf-1");
+		when(executionPort.queryState("wf-1")).thenReturn(new WorkflowExecutionState(
+				"REVIEWING", "WAITING_FOR_USER", "/ws", null, null, "run-1", "build ok", "run-2", "ok", null, null, 0, null));
+		service.getState("wf-1");
+	}
+
+	private void advanceToReadyForPullRequest() {
+		advanceToReviewWaiting();
+		service.continueWorkflow(new ContinueWorkflowCommand("wf-1"));
 	}
 
 	private void startWorkflow() {

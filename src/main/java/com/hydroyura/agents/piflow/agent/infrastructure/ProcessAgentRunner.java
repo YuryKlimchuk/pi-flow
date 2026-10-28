@@ -31,6 +31,7 @@ import com.hydroyura.agents.piflow.agent.domain.AgentProcessResult;
 import com.hydroyura.agents.piflow.agent.domain.AgentProcessRunner;
 import com.hydroyura.agents.piflow.agent.domain.AgentProcessStatus;
 import com.hydroyura.agents.piflow.agent.domain.RoleResources;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -42,6 +43,7 @@ import org.springframework.stereotype.Component;
  * промпт), параллельное чтение stdout/stderr, timeout, отмену и освобождение
  * ресурсов. Локальные Git-операции и workflow-логику не выполняет.</p>
  */
+@Slf4j
 @Component
 public class ProcessAgentRunner implements AgentProcessRunner {
 
@@ -67,10 +69,14 @@ public class ProcessAgentRunner implements AgentProcessRunner {
 	public AgentProcessResult execute(AgentProcessRequest request) {
 		validateExecutable();
 		Path executablePath = resolveExecutable(properties.executable());
+		log.info("pi process starting: runId={} role={} workingDirectory={}",
+				request.runId(), request.role(), request.workingDirectory());
 
 		Process process = null;
 		try {
-			ProcessBuilder builder = new ProcessBuilder(buildCommand(request, executablePath));
+			java.util.List<String> command = buildCommand(request, executablePath);
+			log.debug("pi command: runId={} command={}", request.runId(), command);
+			ProcessBuilder builder = new ProcessBuilder(command);
 			builder.directory(request.workingDirectory().toFile());
 			Map<String, String> environment = builder.environment();
 			environment.clear();
@@ -99,6 +105,10 @@ public class ProcessAgentRunner implements AgentProcessRunner {
 
 			String stdout = stdoutFuture.get(30, TimeUnit.SECONDS);
 			String stderr = stderrFuture.get(30, TimeUnit.SECONDS);
+			log.info("pi process finished: runId={} status={} exitCode={}",
+					request.runId(), status, exitCode);
+			log.debug("pi stdout: runId={} output={}", request.runId(), stdout);
+			log.debug("pi stderr: runId={} output={}", request.runId(), stderr);
 			return new AgentProcessResult(request.runId(), status, stdout, stderr, exitCode);
 		} catch (IOException e) {
 			throw AgentProcessException.launch("failed to start Pi process: " + e.getMessage(), e);

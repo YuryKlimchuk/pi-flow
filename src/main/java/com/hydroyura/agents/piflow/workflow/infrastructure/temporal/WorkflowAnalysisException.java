@@ -18,8 +18,17 @@ public class WorkflowAnalysisException extends RuntimeException {
 		this.reason = reason;
 	}
 
+	public WorkflowAnalysisException(Reason reason, String message, Throwable cause) {
+		super(message, cause);
+		this.reason = reason;
+	}
+
 	public static WorkflowAnalysisException agentFailed(String message) {
 		return new WorkflowAnalysisException(Reason.AGENT_FAILED, message);
+	}
+
+	public static WorkflowAnalysisException agentFailed(String message, Throwable cause) {
+		return new WorkflowAnalysisException(Reason.AGENT_FAILED, message, cause);
 	}
 
 	public static WorkflowAnalysisException invalidResult(String message) {

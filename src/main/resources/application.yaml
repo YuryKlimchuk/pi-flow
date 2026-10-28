@@ -2,6 +2,13 @@ spring:
   application:
     name: pi-flow
 
+logging:
+  level:
+    root: INFO
+    io.temporal: WARN
+    com.hydroyura.agents.piflow.agent: DEBUG
+    com.hydroyura.agents.piflow.workflow: DEBUG
+
 github:
   api:
     base-url: ${GITHUB_API_BASE_URL:https://api.github.com}
@@ -26,6 +33,7 @@ workspace:
   base-directory: ${WORKSPACE_BASE_DIRECTORY:${user.home}/.pi-flow/workspaces}
   lock-directory: ${WORKSPACE_LOCK_DIRECTORY:${user.home}/.pi-flow/locks}
   lease-duration: ${WORKSPACE_LEASE_DURATION:5m}
+  push-token: ${GITHUB_PI_FLOW_TOKEN:}
 
 workflow:
   temporal:

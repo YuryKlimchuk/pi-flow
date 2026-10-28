@@ -15,7 +15,16 @@ import java.util.List;
  * @param analysisText текст артефакта анализа, если анализ завершён
  * @param branchName предложенное имя ветки, если анализ завершён
  * @param designText текст design-артефакта, если проектирование завершено
+ * @param implementationRunId идентификатор запуска Developer
+ * @param implementationDiagnostics диагностика сборки/тестов реализации
+ * @param reviewText текст результата ревью
+ * @param reviewRunId идентификатор запуска Reviewer
  * @param errorMessage сообщение об ошибке, если workflow завершился ошибкой
+ * @param timeline неизменяемая история завершённых шагов
+ * @param commitId идентификатор итогового коммита
+ * @param branchUrl URL опубликованной ветки
+ * @param prNumber номер созданного pull request (0, если не создан)
+ * @param prUrl URL созданного pull request
  */
 public record WorkflowState(
 		String workflowId,
@@ -28,9 +37,14 @@ public record WorkflowState(
 		String analysisText,
 		String branchName,
 		String designText,
+		String implementationRunId,
+		String implementationDiagnostics,
+		String reviewText,
+		String reviewRunId,
 		String errorMessage,
 		List<WorkflowStepInfo> timeline,
-		boolean branchCreated,
 		String commitId,
-		String branchUrl) {
+		String branchUrl,
+		long prNumber,
+		String prUrl) {
 }

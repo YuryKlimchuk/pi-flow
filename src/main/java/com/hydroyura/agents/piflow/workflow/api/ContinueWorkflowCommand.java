@@ -1,12 +1,12 @@
 package com.hydroyura.agents.piflow.workflow.api;
 
 /**
- * Публичная команда продолжения Workflow после успешного анализа.
+ * Публичная команда продолжения Workflow на текущем ручном gate
+ * (анализ, проектирование или ревью).
  *
  * @param workflowId идентификатор workflow
- * @param branchName предложенное Analyst имя ветки
  */
-public record ContinueWorkflowCommand(String workflowId, String branchName) {
+public record ContinueWorkflowCommand(String workflowId) {
 
 	/**
 	 * Проверяет обязательные поля команды до продолжения.
@@ -16,9 +16,6 @@ public record ContinueWorkflowCommand(String workflowId, String branchName) {
 	public void validate() {
 		if (workflowId == null || workflowId.isBlank()) {
 			throw WorkflowException.validation("workflowId must not be blank");
-		}
-		if (branchName == null || branchName.isBlank()) {
-			throw WorkflowException.validation("branchName must not be blank");
 		}
 	}
 }

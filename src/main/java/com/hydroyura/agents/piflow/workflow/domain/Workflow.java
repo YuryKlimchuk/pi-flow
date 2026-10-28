@@ -17,6 +17,9 @@ import java.util.Set;
  */
 public final class Workflow {
 
+	/** Максимальное число повторных итераций (rework) одного цикла. */
+	public static final int MAX_REWORK = 3;
+
 	private final WorkflowId id;
 	private final WorkflowContext context;
 	private WorkflowStatus status;
@@ -28,10 +31,17 @@ public final class Workflow {
 	private String branchName;
 	private String analysisText;
 	private String designText;
-	private String failureReason;
-	private boolean branchCreated;
+	private String implementationRunId;
+	private String implementationDiagnostics;
+	private String reviewRunId;
+	private String reviewText;
+	private int implementationReworkCount;
+	private int reviewReworkCount;
 	private String commitId;
 	private String branchUrl;
+	private long prNumber;
+	private String prUrl;
+	private String failureReason;
 
 	private static final Map<WorkflowStage, Set<WorkflowStage>> NEXT_STAGES = nextStages();
 
@@ -98,12 +108,28 @@ public final class Workflow {
 		return designText;
 	}
 
-	public String failureReason() {
-		return failureReason;
+	public String implementationRunId() {
+		return implementationRunId;
 	}
 
-	public boolean branchCreated() {
-		return branchCreated;
+	public String implementationDiagnostics() {
+		return implementationDiagnostics;
+	}
+
+	public String reviewRunId() {
+		return reviewRunId;
+	}
+
+	public String reviewText() {
+		return reviewText;
+	}
+
+	public int implementationReworkCount() {
+		return implementationReworkCount;
+	}
+
+	public int reviewReworkCount() {
+		return reviewReworkCount;
 	}
 
 	public String commitId() {
@@ -112,6 +138,18 @@ public final class Workflow {
 
 	public String branchUrl() {
 		return branchUrl;
+	}
+
+	public long prNumber() {
+		return prNumber;
+	}
+
+	public String prUrl() {
+		return prUrl;
+	}
+
+	public String failureReason() {
+		return failureReason;
 	}
 
 	/**
@@ -147,12 +185,7 @@ public final class Workflow {
 	 * Продолжает Workflow после успешного анализа на следующий этап ровно один раз.
 	 */
 	public void continueAfterAnalysis() {
-		if (status != WorkflowStatus.WAITING_FOR_USER) {
-			throw new IllegalWorkflowTransitionException("cannot continue from status " + status);
-		}
-		if (currentStage != WorkflowStage.ANALYZING_REQUIREMENTS) {
-			throw new IllegalWorkflowTransitionException("cannot continue from stage " + currentStage);
-		}
+		requireWaitingAt(WorkflowStage.ANALYZING_REQUIREMENTS);
 		if (analysisText == null || branchName == null) {
 			throw new IllegalWorkflowTransitionException("cannot continue without a recorded analysis result");
 		}
@@ -161,35 +194,24 @@ public final class Workflow {
 		this.analysisText = null;
 		this.designText = null;
 	}
+
 	/**
 	 * Возвращает Workflow к анализу для повторного запуска с замечаниями.
 	 *
 	 * @param feedback замечания пользователя к текущему анализу
 	 */
 	public void rework(String feedback) {
-		if (status != WorkflowStatus.WAITING_FOR_USER) {
-			throw new IllegalWorkflowTransitionException("cannot rework from status " + status);
-		}
-		if (analysisText == null && designText == null) {
+		requireWaitingAt(WorkflowStage.ANALYZING_REQUIREMENTS);
+		if (analysisText == null) {
 			throw new IllegalWorkflowTransitionException("cannot rework without a recorded result");
 		}
 		resume();
 		this.analysisText = null;
-		this.designText = null;
-		if (currentStage == WorkflowStage.ANALYZING_REQUIREMENTS) {
-			this.branchName = null;
-		}
+		this.branchName = null;
 		appendStep(currentStage.name(), roleForStage(), "REWORK", feedback, null);
 		checkpoints.add(new Checkpoint("rework", feedback == null ? "" : feedback));
 	}
 
-	private String roleForStage() {
-		return switch (currentStage) {
-			case ANALYZING_REQUIREMENTS -> "ANALYST";
-			case DESIGNING_SOLUTION -> "ARCHITECT";
-			default -> currentStage.name();
-		};
-	}
 	/**
 	 * Фиксирует результат проектирования Architect.
 	 *
@@ -206,34 +228,146 @@ public final class Workflow {
 	}
 
 	/**
-	 * Создаёт итоговую ветку после утверждённого proposal Architect.
+	 * Продолжает Workflow после утверждённого proposal Architect на этап реализации.
 	 */
-	public void createBranch() {
-		if (status != WorkflowStatus.WAITING_FOR_USER) {
-			throw new IllegalWorkflowTransitionException("cannot create branch from status " + status);
-		}
-		if (currentStage != WorkflowStage.DESIGNING_SOLUTION) {
-			throw new IllegalWorkflowTransitionException("cannot create branch from stage " + currentStage);
-		}
+	public void continueAfterDesign() {
+		requireWaitingAt(WorkflowStage.DESIGNING_SOLUTION);
 		if (designText == null) {
-			throw new IllegalWorkflowTransitionException("cannot create branch without an approved proposal");
+			throw new IllegalWorkflowTransitionException("cannot continue without an approved proposal");
 		}
-		this.branchCreated = true;
+		resume();
+		completeStage();
 		this.designText = null;
-		checkpoints.add(new Checkpoint("branch", branchName == null ? "" : branchName));
 	}
 
 	/**
-	 * Фиксирует успешную публикацию ветки и завершает workflow.
+	 * Возвращает Workflow к проектированию для повторного запуска с замечаниями.
+	 *
+	 * @param feedback замечания пользователя к текущему проекту
 	 */
-	public void push(String commitId, String branchUrl) {
-		if (!branchCreated) {
-			throw new IllegalWorkflowTransitionException("cannot push before branch creation");
+	public void reworkDesign(String feedback) {
+		requireWaitingAt(WorkflowStage.DESIGNING_SOLUTION);
+		if (designText == null) {
+			throw new IllegalWorkflowTransitionException("cannot rework without a recorded result");
+		}
+		resume();
+		this.designText = null;
+		appendStep(currentStage.name(), roleForStage(), "REWORK", feedback, null);
+		checkpoints.add(new Checkpoint("rework", feedback == null ? "" : feedback));
+	}
+
+	/**
+	 * Фиксирует результат реализации Developer.
+	 *
+	 * <p>При успехе переводит этап на {@link WorkflowStage#REVIEWING}; при неудаче
+	 * переводит workflow в {@code WAITING_FOR_USER} для повторной итерации.</p>
+	 *
+	 * @param runId идентификатор запуска агента
+	 * @param diagnostics диагностика сборки/тестов
+	 * @param success признак успешной сборки и тестов
+	 */
+	public void recordImplementation(String runId, String diagnostics, boolean success) {
+		if (currentStage != WorkflowStage.IMPLEMENTING) {
+			throw new IllegalWorkflowTransitionException("cannot record implementation from stage " + currentStage);
+		}
+		this.implementationRunId = runId;
+		this.implementationDiagnostics = diagnostics;
+		appendStep("IMPLEMENTING", "DEVELOPER", "IMPLEMENT", diagnostics, runId);
+		if (success) {
+			if (status == WorkflowStatus.WAITING_FOR_USER) {
+				resume();
+			}
+			completeStage();
+			checkpoints.add(new Checkpoint("implementation", diagnostics == null ? "" : diagnostics));
+		} else {
+			checkpoints.add(new Checkpoint("implementation-failure", diagnostics == null ? "" : diagnostics));
+			waitForUser();
+		}
+	}
+
+	/**
+	 * Возвращает Workflow к реализации с замечаниями пользователя (лимит 3).
+	 *
+	 * @param feedback замечания пользователя к текущей реализации
+	 */
+	public void reworkImplementation(String feedback) {
+		requireWaitingAt(WorkflowStage.IMPLEMENTING);
+		if (implementationReworkCount >= MAX_REWORK) {
+			fail("implementation rework limit exceeded");
+			return;
+		}
+		resume();
+		implementationReworkCount++;
+		this.implementationDiagnostics = null;
+		this.implementationRunId = null;
+		appendStep("IMPLEMENTING", "DEVELOPER", "REWORK", feedback, null);
+		checkpoints.add(new Checkpoint("rework", feedback == null ? "" : feedback));
+	}
+
+	/**
+	 * Фиксирует результат независимого ревью Reviewer.
+	 *
+	 * @param runId идентификатор запуска агента
+	 * @param reviewText текст результата ревью
+	 */
+	public void recordReview(String runId, String reviewText) {
+		if (currentStage != WorkflowStage.REVIEWING) {
+			throw new IllegalWorkflowTransitionException("cannot record review from stage " + currentStage);
+		}
+		this.reviewRunId = runId;
+		this.reviewText = reviewText;
+		appendStep("REVIEWING", "REVIEWER", "REVIEW", reviewText, runId);
+		checkpoints.add(new Checkpoint("review", ""));
+		waitForUser();
+	}
+
+	/**
+	 * Одобряет результат ревью и переводит workflow к финализации.
+	 */
+	public void approveReview() {
+		requireWaitingAt(WorkflowStage.REVIEWING);
+		if (reviewText == null) {
+			throw new IllegalWorkflowTransitionException("cannot approve without a recorded review result");
+		}
+		resume();
+		completeStage();
+		this.reviewText = null;
+	}
+
+	/**
+	 * Возвращает замечания ревью в реализацию (лимит 3).
+	 *
+	 * @param feedback замечания пользователя к результату ревью
+	 */
+	public void reworkReview(String feedback) {
+		requireWaitingAt(WorkflowStage.REVIEWING);
+		if (reviewReworkCount >= MAX_REWORK) {
+			fail("review rework limit exceeded");
+			return;
+		}
+		resume();
+		reviewReworkCount++;
+		this.reviewText = null;
+		this.reviewRunId = null;
+		this.currentStage = WorkflowStage.IMPLEMENTING;
+		appendStep("REVIEWING", "REVIEWER", "REWORK", feedback, null);
+		checkpoints.add(new Checkpoint("rework", feedback == null ? "" : feedback));
+	}
+
+	/**
+	 * Фиксирует успешную финализацию (коммит, публикация ветки, PR) и завершает workflow.
+	 */
+	public void finalize(String commitId, String branchUrl, long prNumber, String prUrl) {
+		if (currentStage != WorkflowStage.READY_FOR_PULL_REQUEST) {
+			throw new IllegalWorkflowTransitionException("cannot finalize from stage " + currentStage);
 		}
 		this.commitId = commitId;
 		this.branchUrl = branchUrl;
-		this.status = WorkflowStatus.COMPLETED;
-		checkpoints.add(new Checkpoint("push", branchUrl == null ? "" : branchUrl));
+		this.prNumber = prNumber;
+		this.prUrl = prUrl;
+		completedStages.add(currentStage);
+		status = WorkflowStatus.COMPLETED;
+		checkpoints.add(new Checkpoint("finalize", prUrl == null ? "" : prUrl));
 	}
 
 	/**
@@ -252,7 +386,6 @@ public final class Workflow {
 			throw new IllegalWorkflowTransitionException(
 					"stage " + currentStage + " has no allowed next stage in status " + status);
 		}
-		// Единственный следующий этап по линейной модели процесса.
 		return completeStage(next.iterator().next());
 	}
 
@@ -300,23 +433,6 @@ public final class Workflow {
 	}
 
 	/**
-	 * Помечает Workflow как завершённый. Допустимо только с последнего этапа.
-	 */
-	public void complete() {
-		if (currentStage != WorkflowStage.READY_FOR_PULL_REQUEST) {
-			throw new IllegalWorkflowTransitionException(
-					"cannot complete workflow from stage " + currentStage);
-		}
-		if (status == WorkflowStatus.RUNNING || status == WorkflowStatus.CREATED || status == WorkflowStatus.WAITING_FOR_USER) {
-			completedStages.add(currentStage);
-			currentStage = WorkflowStage.READY_FOR_PULL_REQUEST;
-			status = WorkflowStatus.COMPLETED;
-			return;
-		}
-		throw new IllegalWorkflowTransitionException("cannot complete workflow from status " + status);
-	}
-
-	/**
 	 * Помечает Workflow как завершившийся ошибкой.
 	 */
 	public void fail(String reason) {
@@ -345,6 +461,25 @@ public final class Workflow {
 
 	public void addCheckpoint(String name, String value) {
 		checkpoints.add(new Checkpoint(name, value));
+	}
+
+	private void requireWaitingAt(WorkflowStage stage) {
+		if (status != WorkflowStatus.WAITING_FOR_USER) {
+			throw new IllegalWorkflowTransitionException("cannot act from status " + status);
+		}
+		if (currentStage != stage) {
+			throw new IllegalWorkflowTransitionException("cannot act from stage " + currentStage);
+		}
+	}
+
+	private String roleForStage() {
+		return switch (currentStage) {
+			case ANALYZING_REQUIREMENTS -> "ANALYST";
+			case DESIGNING_SOLUTION -> "ARCHITECT";
+			case IMPLEMENTING -> "DEVELOPER";
+			case REVIEWING -> "REVIEWER";
+			default -> currentStage.name();
+		};
 	}
 
 	private static Map<WorkflowStage, Set<WorkflowStage>> nextStages() {

@@ -7,8 +7,14 @@ package com.hydroyura.agents.piflow.workflow.infrastructure.temporal;
  * @param status статус workflow
  * @param workspacePath путь к подготовленному workspace
  * @param branchName предложенное имя ветки
- * @param analysisArtifactPath путь к артефакту анализа
- * @param designArtifactPath путь к артефакту проектирования
+ * @param implementationRunId идентификатор запуска Developer
+ * @param implementationDiagnostics диагностика сборки/тестов реализации
+ * @param reviewRunId идентификатор запуска Reviewer
+ * @param reviewText текст результата ревью
+ * @param commitId идентификатор итогового коммита
+ * @param branchUrl URL опубликованной ветки
+ * @param prNumber номер созданного pull request
+ * @param prUrl URL созданного pull request
  * @param failureReason причина ошибки
  */
 public record WorkflowStageState(
@@ -16,7 +22,13 @@ public record WorkflowStageState(
 		String status,
 		String workspacePath,
 		String branchName,
-		String analysisArtifactPath,
-		String designArtifactPath,
+		String implementationRunId,
+		String implementationDiagnostics,
+		String reviewRunId,
+		String reviewText,
+		String commitId,
+		String branchUrl,
+		long prNumber,
+		String prUrl,
 		String failureReason) {
 }
